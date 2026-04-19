@@ -674,6 +674,49 @@ async fn run_send(client: &mut Client, args: &[String]) -> Result<Value> {
     .await
 }
 
+/// `limux notify` — post a notification into the sidebar + toast overlay.
+///
+/// Usage:
+///   limux notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>
+///   limux notify --title "..." --subtitle "..." --body "..."
+///
+/// Mirrors the `cmux notify` shape (title / subtitle / body). Title is
+/// required; subtitle and body are optional. Falls back to the current
+/// workspace via LIMUX_WORKSPACE_ID when --workspace isn't given.
+async fn run_notify(client: &mut Client, args: &[String]) -> Result<Value> {
+    let workspace = parse_opt(args, "--workspace")
+        .or_else(|| env::var("LIMUX_WORKSPACE_ID").ok())
+        .filter(|s| !s.is_empty());
+
+    // Title can be provided either via --title or as the trailing positional
+    // (matching `limux send`'s ergonomics).
+    let title = parse_opt(args, "--title")
+        .or_else(|| trailing_title(args))
+        .ok_or_else(|| anyhow!("notify requires a title"))?;
+
+    let subtitle = parse_opt(args, "--subtitle").unwrap_or_default();
+    let body = parse_opt(args, "--body")
+        .or_else(|| parse_opt(args, "--message"))
+        .unwrap_or_default();
+
+    let mut params = Map::new();
+    params.insert("title".to_string(), Value::String(title));
+    if !subtitle.is_empty() {
+        params.insert("subtitle".to_string(), Value::String(subtitle));
+    }
+    if !body.is_empty() {
+        params.insert("body".to_string(), Value::String(body));
+    }
+
+    call_in_workspace_scope(
+        client,
+        workspace,
+        "notification.create",
+        Value::Object(params),
+    )
+    .await
+}
+
 async fn run_new_workspace(client: &mut Client, args: &[String]) -> Result<Value> {
     let cwd = parse_opt(args, "--cwd");
     let command = parse_opt(args, "--command");
@@ -1748,6 +1791,14 @@ async fn execute_command(client: &mut Client, opts: &GlobalOptions) -> Result<Co
             } else {
                 let handle = handle_from_payload(&payload, "surface_id", "surface_ref");
                 CommandOutput::Text(format!("OK {}", handle.trim()))
+            }
+        }
+        "notify" => {
+            let payload = run_notify(client, args).await?;
+            if opts.json_output {
+                CommandOutput::Json(payload)
+            } else {
+                CommandOutput::Text("OK".to_string())
             }
         }
         "new-workspace" => {

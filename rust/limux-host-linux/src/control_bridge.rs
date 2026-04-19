@@ -26,6 +26,7 @@ const METHODS: &[&str] = &[
     "workspace.rename",
     "workspace.close",
     "surface.send_text",
+    "notification.create",
 ];
 
 const PARSE_ERROR_CODE: i64 = -32700;
@@ -82,6 +83,16 @@ pub enum ControlCommand {
         text: String,
         reply: mpsc::Sender<BridgeResult>,
     },
+    /// Post a desktop-style notification into the sidebar + toast overlay.
+    /// `target` chooses the workspace to flag as unread; if not provided,
+    /// the currently-active workspace is used.
+    CreateNotification {
+        target: WorkspaceTarget,
+        title: String,
+        subtitle: String,
+        body: String,
+        reply: mpsc::Sender<BridgeResult>,
+    },
 }
 
 impl ControlCommand {
@@ -94,7 +105,8 @@ impl ControlCommand {
             | Self::SelectWorkspace { reply, .. }
             | Self::RenameWorkspace { reply, .. }
             | Self::CloseWorkspace { reply, .. }
-            | Self::SendText { reply, .. } => {
+            | Self::SendText { reply, .. }
+            | Self::CreateNotification { reply, .. } => {
                 let _ = reply.send(result);
             }
         }
@@ -318,6 +330,34 @@ fn handle_method(
                     target,
                     surface_hint: optional_string(params, &["surface_id"]),
                     text,
+                    reply,
+                },
+                rx,
+            )
+        }
+        "notification.create" | "notify" => {
+            // Title is required; subtitle and body are optional. This mirrors
+            // cmux notify's shape (title/subtitle/body) and maps onto the
+            // existing sidebar unread pipeline.
+            let Some(title) = optional_string(params, &["title"]) else {
+                return error_response(
+                    id,
+                    BridgeError::invalid_params("notification.create requires title"),
+                );
+            };
+            let subtitle = optional_string(params, &["subtitle"]).unwrap_or_default();
+            let body = optional_string(params, &["body", "message"]).unwrap_or_default();
+            let target = match parse_optional_workspace_target(params, false) {
+                Ok(target) => target,
+                Err(error) => return error_response(id, error),
+            };
+            let (reply, rx) = mpsc::channel();
+            (
+                ControlCommand::CreateNotification {
+                    target,
+                    title,
+                    subtitle,
+                    body,
                     reply,
                 },
                 rx,

@@ -3084,6 +3084,50 @@ fn handle_control_command(state: &State, command: ControlCommand) {
             }
             let _ = reply.send(Ok(payload));
         }
+        ControlCommand::CreateNotification {
+            target,
+            title,
+            subtitle,
+            body,
+            reply,
+        } => {
+            // Resolve the workspace target. `WorkspaceTarget::Active` maps to
+            // the currently-focused workspace via workspace_index_for_target.
+            let resolved = {
+                let app_state = state.borrow();
+                workspace_index_for_target(&app_state, &target)
+            };
+
+            let Some(index) = resolved else {
+                let _ = reply.send(Err(crate::control_bridge::BridgeError::not_found(
+                    "workspace not found",
+                )));
+                return;
+            };
+
+            let ws_id = state.borrow().workspaces[index].id.clone();
+
+            // Build the sidebar message: title becomes the bold prefix,
+            // subtitle + body are joined with " — " for the body text.
+            let combined_body = match (subtitle.is_empty(), body.is_empty()) {
+                (true, true) => String::new(),
+                (true, false) => body.clone(),
+                (false, true) => subtitle.clone(),
+                (false, false) => format!("{subtitle} — {body}"),
+            };
+            let message = workspace_notification_message(&title, &combined_body);
+            mark_workspace_unread_with_message(state, &ws_id, &message);
+
+            let payload = serde_json::json!({
+                "ok": true,
+                "workspace_id": ws_id,
+                "workspace_ref": workspace_ref(&ws_id),
+                "title": title,
+                "subtitle": subtitle,
+                "body": body,
+            });
+            let _ = reply.send(Ok(payload));
+        }
     }
 }
 

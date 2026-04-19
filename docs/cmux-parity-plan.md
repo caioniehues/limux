@@ -1,63 +1,67 @@
-# cmux-parity plan
+# cmux-parity plan (revised after architectural discovery)
 
-Bringing the cmux CLI feature set (and agent-to-agent comms workflow) to limux.
+## Architecture discovery
 
-## What limux already has
+Limux has **two control servers**:
 
-| Feature | Status | Location |
-|---|---|---|
-| Control socket + JSON envelope | ✅ | `limux-control`, `limux-protocol` |
-| `limux identify` | ✅ | `limux-cli/src/main.rs` |
-| `limux send` (send keys to a surface) | ✅ | ditto |
-| `limux read-screen` / `capture-pane` | ✅ | ditto |
-| `limux list-panes` / `list-workspaces` / `list-panels` | ✅ | ditto |
-| `limux new-workspace` / `close-workspace` / `new-surface` / `new-pane` | ✅ | ditto |
-| `limux rename-*` / `tab-action` | ✅ | ditto |
-| `limux browser …` (click/type/snapshot/screenshot) | ✅ | ditto |
-| OSC 9 / desktop notification callback | ✅ | `terminal.rs` + `pane.rs` |
-| Bell + workspace unread highlight | ✅ | `window.rs` |
+1. **Standalone `limux-control-server` binary** — uses `limux_core::Dispatcher`
+   + `ControlState` and supports the **full** command vocabulary. Used for
+   tests and for CLI calls when the GUI isn't running.
 
-## Gaps vs. cmux
+2. **Embedded bridge inside `limux-host-linux`** — `control_bridge.rs` only
+   routes a narrow subset of methods to the GTK main loop. Supports
+   `system.ping`, `system.identify`, `workspace.{current,list,create,
+   select,rename,close}`, `surface.send_text`. **Does NOT support**
+   `pane.list`, `pane.surfaces`, `surface.list`, `surface.read_text`,
+   `surface.send_key`, `notification.*`, or any browser commands.
 
-1. **Env auto-wiring** — spawned shells don't see `LIMUX_WORKSPACE` / `LIMUX_SURFACE` / `LIMUX_PANE` / `LIMUX_SOCKET`, so every CLI call has to be told which target. cmux's magic is that you just type `cmux notify …` and it targets the current pane.
-2. **`limux notify`** — native notification with title/body/subtitle, routed into sidebar and toast.
-3. **`limux progress`** — 0.0–1.0 bar with label, per-surface.
-4. **`limux log`** — structured per-workspace log stream with level + source.
-5. **`limux markdown`** — open `.md` in a live-reload GTK panel.
-6. **`limux claude-hook`** — wrapper that wires Claude Code session-start / stop / notification events into the UI (plus OpenCode/Gemini variants).
-7. **Agent-team spawner** — spawn N agent surfaces (codex, claude-code, opencode, gemini) into a workspace with a pre-seeded `AGENTS.md` describing the XML message protocol so they can talk to each other.
-8. **Per-pane attention ring + sidebar metadata** (git branch, PR, cwd, ports, latest notif text) — nice-to-have, not the user's priority.
+When the GUI is running, the CLI targets the bridge via the runtime
+socket. `list-panes`, `read-screen`, and most other commands currently
+**error out** against the running host — this is the root blocker for
+the Codex↔Claude workflow.
 
-## Phased delivery
+## Delivery strategy (revised)
 
-### Phase 1 — Env auto-wiring (foundation)  ← START HERE
-- Thread `workspace_id` / `surface_id` / `pane_id` into `TerminalOptions`.
-- Build `ghostty_env_var_s` array at `create_terminal`, set `env_vars` + `env_var_count` on `ghostty_surface_config_s`.
-- Exported vars: `LIMUX_WORKSPACE`, `LIMUX_SURFACE`, `LIMUX_PANE`, `LIMUX_SOCKET`.
-- CLI resolver: if `--workspace` / `--surface` not given, fall back to env vars, then to `identify`.
-- Tests: spawn a pane, `env | grep LIMUX_` sees all four.
+### Phase 1 — Env auto-wiring ✅ (shipped in 1295d12)
 
-### Phase 2 — `limux notify` + `limux progress` + `limux log`
-- New control commands: `notification.create`, `progress.set`, `log.append`.
-- `notify` plumbs through existing unread-workspace pipeline + libadwaita toast.
-- `progress` renders a small bar in the sidebar row for the surface.
-- `log` writes to `~/.local/share/limux/logs/<workspace>.log` and emits a tail to the sidebar on demand.
+### Phase 2 — Make the bridge a full proxy (CRITICAL)
 
-### Phase 3 — `limux markdown <file>`
-- `markdown.open` control command spawns a WebKit pane (we already have browser panes) pointing at a local render URL, with an inotify watcher that reloads on change.
+The bridge should route unknown methods to a local `Dispatcher` instance
+seeded with live GTK state, OR to dedicated per-method `ControlCommand`
+variants that interrogate the live state. The cleanest path:
 
-### Phase 4 — `limux claude-hook`
-- Subcommand that reads Claude Code hook JSON from stdin and fans out to `notify` / `log` / `progress`.
-- Writes install snippet to `~/.claude/settings.json` hooks section.
-- Parallel helpers: `limux opencode-hook`, `limux gemini-hook`.
+- Maintain a `Arc<Mutex<ControlState>>` owned by the GTK app, kept in
+  sync with live workspace/pane/surface state.
+- Bridge falls through unknown methods to `Dispatcher::dispatch` on that
+  shared state.
+- Specific methods that need GTK side-effects (send_text, create_surface,
+  notification.create) remain as `ControlCommand` variants.
 
-### Phase 5 — `limux agent-team`
-- `limux agent-team --workspace <id> --agents codex,claude-code[,opencode,gemini]`
-- For each agent: create a surface, spawn the agent CLI in it, record its surface id.
-- Seed `./AGENTS.md` in the workspace cwd with the XML message protocol and the surface-id table so agents know who they're talking to.
-- The prompt the user referenced ("run `limux -h`, identify yourself and your peers, codify in AGENTS.md") becomes the default seed.
+This unblocks `list-panes`, `pane.surfaces`, `surface.list`,
+`surface.read_text`, `surface.send_key` against the live GUI — i.e.
+everything needed for agents to discover each other and read each
+other's screens.
 
-## Non-goals (for this branch)
-- SSH workspaces — separate branch.
-- Browser import (cookies from Chrome/Firefox/Arc) — separate branch.
-- Per-pane blue attention ring in GTK — nice-to-have follow-up after phase 1–2 land.
+### Phase 3 — `limux notify` + GUI toast/sidebar integration
+Wire a new `ControlCommand::CreateNotification` variant in the bridge,
+plumb into `mark_workspace_unread_with_message` + libadwaita toast.
+Add CLI subcommand.
+
+### Phase 4 — `limux claude-hook` / `opencode-hook` / `gemini-hook`
+Read hook JSON from stdin, translate to `notify`/`send`. Provides a one-line
+install into `~/.claude/settings.json`.
+
+### Phase 5 — `limux agent-team` + `AGENTS.md` template
+Spawns N agent surfaces, captures their surface IDs, writes
+`./AGENTS.md` with the XML message protocol and the surface-id table,
+launches each agent with the seed prompt.
+
+### Phase 6 — (deferred) `limux progress`, `limux log`, `limux markdown`
+Nice polish, not blockers.
+
+## Why phase 2 first
+
+Without a real bridge, every subsequent feature ends up routing around
+the same hole: the GUI owns the ground truth about surfaces/panes but
+the CLI can't query it. Fixing this once, properly, makes phases 3–5
+small.
