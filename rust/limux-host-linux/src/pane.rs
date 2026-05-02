@@ -158,6 +158,7 @@ pub fn set_workspace_dragging_all(active: bool) {
 type PaneSplitCallback = dyn Fn(&gtk::Widget, gtk::Orientation);
 type PaneWidgetCallback = dyn Fn(&gtk::Widget);
 type PaneSignalCallback = dyn Fn();
+type PaneBellCallback = dyn Fn(bool, u32, &str);
 type PanePathCallback = dyn Fn(&str);
 type PaneDesktopNotificationCallback = dyn Fn(&str, &str, bool, u32, &str);
 type PaneEmptyCallback = dyn Fn(&gtk::Widget, PaneEmptyReason);
@@ -172,7 +173,7 @@ type PaneConfigChangedCallback = dyn Fn(&AppConfig, &AppConfig);
 pub struct PaneCallbacks {
     pub on_split: Box<PaneSplitCallback>,
     pub on_close_pane: Box<PaneWidgetCallback>,
-    pub on_bell: Box<PaneSignalCallback>,
+    pub on_bell: Box<PaneBellCallback>,
     pub on_desktop_notification: Box<PaneDesktopNotificationCallback>,
     pub on_open_browser_here: Box<PaneOpenBrowserHereCallback>,
     pub on_open_keybinds: Box<PaneWidgetCallback>,
@@ -1009,8 +1010,11 @@ fn make_terminal_callbacks(
                 (callbacks.on_desktop_notification)(title, body, source_focused, pane_id, &tab_id);
             }
         }),
-        on_bell: Box::new(move || {
-            (callbacks_for_bell.on_bell)();
+        on_bell: Box::new({
+            let tab_id = tid_for_notification.clone();
+            move |source_focused| {
+                (callbacks_for_bell.on_bell)(source_focused, pane_id, &tab_id);
+            }
         }),
         on_close: Box::new(move || {
             let tab_strip = tab_strip.clone();

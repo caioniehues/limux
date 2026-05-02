@@ -3399,12 +3399,19 @@ pub(crate) fn create_pane_for_workspace(
         on_close_pane: Box::new(move |pane_widget| {
             remove_pane_internal(&state_for_close, &ws_id_close, pane_widget, true);
         }),
-        on_bell: Box::new(move || {
+        on_bell: Box::new(move |source_focused: bool, pane_id: u32, tab_id: &str| {
             // Defer to avoid RefCell borrow conflicts — bell can fire during state mutation
             let state = state_for_bell.clone();
             let ws_id = ws_id_bell.clone();
+            let tab_id = tab_id.to_string();
+            let target = DesktopNotificationTarget {
+                workspace_id: ws_id.clone(),
+                pane_id: Some(pane_id),
+                tab_id: Some(tab_id),
+            };
             glib::idle_add_local_once(move || {
-                if let Some(request) = mark_workspace_unread(&state, &ws_id) {
+                if let Some(request) = mark_workspace_unread(&state, &ws_id, source_focused, target)
+                {
                     show_desktop_notification(&state, request);
                 }
             });
@@ -4478,17 +4485,18 @@ fn should_emit_desktop_notification(
     desktop_notifications_enabled && (!window_active || !workspace_is_active || !source_focused)
 }
 
-fn mark_workspace_unread(state: &State, ws_id: &str) -> Option<DesktopNotificationRequest> {
+fn mark_workspace_unread(
+    state: &State,
+    ws_id: &str,
+    source_focused: bool,
+    target: DesktopNotificationTarget,
+) -> Option<DesktopNotificationRequest> {
     mark_workspace_unread_with_message(
         state,
         ws_id,
         "Process needs attention",
-        true,
-        DesktopNotificationTarget {
-            workspace_id: ws_id.to_string(),
-            pane_id: None,
-            tab_id: None,
-        },
+        source_focused,
+        target,
     )
 }
 
