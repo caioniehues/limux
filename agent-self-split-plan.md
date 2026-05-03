@@ -299,9 +299,24 @@ T6 ───────────────┘
   follow-up so terminal self-spawn is not blocked by browser-tab wiring.
 - **validation**: Parser tests show `type=browser`, `--url`, and
   `type=browser --command claude` fail fast in the live bridge contract.
-- **status**: Not Completed
+- **status**: Completed
 - **log**:
+- 2026-05-03: Verified the live GTK bridge already rejects browser self-spawn
+  at parser time through `parse_create_pane_request`: `type=browser` and
+  `url` return invalid params before GTK work, and the browser+command case is
+  covered by the same browser type rejection.
+- 2026-05-03: Added CLI/README wording so `new-pane` does not imply browser
+  self-spawn is supported by the live GTK bridge in this terminal-agent
+  feature.
+- 2026-05-03: Validation passed:
+  `cargo test -p limux-host-linux pane_create_contract_rejects_deferred_browser_fields`;
+  `cargo test -p limux-host-linux pane_create`;
+  `cargo check -p limux-cli`;
+  `cargo run -p limux-cli -- --help`.
 - **files edited/created**:
+  - `agent-self-split-plan.md`
+  - `README.md`
+  - `rust/limux-cli/src/main.rs`
 
 ### T7: Launch optional command in the created terminal pane
 
