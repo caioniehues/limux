@@ -247,9 +247,23 @@ T6 ───────────────┘
   prefixed source IDs are serialized unchanged; help text includes the new
   flags. Non-JSON output may keep returning the surface handle, but JSON output
   must expose pane and surface IDs.
-- **status**: Not Completed
+- **status**: Completed
 - **log**:
+  - 2026-05-03: Added `new-pane` source-target serialization for
+    `--pane`, `--surface`, and `--command`, with `LIMUX_WORKSPACE_ID`,
+    `LIMUX_SURFACE_ID`, and `LIMUX_PANE_ID` defaults when flags are absent.
+  - 2026-05-03: Preserved active-workspace fallback outside Limux terminals by
+    omitting `workspace_id` when neither `--workspace` nor
+    `LIMUX_WORKSPACE_ID` is available.
+  - 2026-05-03: Updated CLI help and README examples for agent self-splitting.
+  - 2026-05-03: Validation passed:
+    `cargo test -p limux-cli`;
+    `cargo check -p limux-cli`;
+    `cargo run -p limux-cli -- --help`.
 - **files edited/created**:
+  - `agent-self-split-plan.md`
+  - `README.md`
+  - `rust/limux-cli/src/main.rs`
 
 ### T5: Implement source-aware live GTK pane creation on the main thread
 

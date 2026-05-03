@@ -197,7 +197,7 @@ fn parse_global_args() -> Result<GlobalOptions> {
 
 fn print_help() {
     println!(
-        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--url <url>]\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Spawns one workspace per agent, launches each CLI inside it, and writes\n      AGENTS.md describing the <agent-msg> XML protocol so peers can talk via\n      `limux send --workspace <peer-name> <envelope>`.\n"
+        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--pane <id|ref>] [--surface <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--command <text>] [--url <url>]\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Spawns one workspace per agent, launches each CLI inside it, and writes\n      AGENTS.md describing the <agent-msg> XML protocol so peers can talk via\n      `limux send --workspace <peer-name> <envelope>`.\n"
     );
 }
 
@@ -1235,24 +1235,55 @@ async fn run_new_surface(client: &mut Client, args: &[String]) -> Result<Value> 
     call_in_workspace_scope(client, workspace, "surface.create", json!({})).await
 }
 
-async fn run_new_pane(client: &mut Client, args: &[String]) -> Result<Value> {
-    // `pane.create` contract shared with the core dispatcher and live GTK host:
-    // direction/type are validated by the server, responses keep
-    // pane_id/pane_ref/surface_id/surface_ref, and the agent-friendly
-    // --surface/--pane/--command plus LIMUX_* defaults are added by the
-    // follow-up CLI task without changing this method name.
-    let workspace = parse_opt(args, "--workspace");
+fn env_opt(name: &str) -> Option<String> {
+    env::var(name).ok()
+}
+
+fn nonempty(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.trim().is_empty())
+}
+
+fn build_new_pane_request(
+    args: &[String],
+    env_lookup: impl Fn(&str) -> Option<String>,
+) -> (Option<String>, Value) {
+    let workspace =
+        nonempty(parse_opt(args, "--workspace").or_else(|| env_lookup("LIMUX_WORKSPACE_ID")));
+    let surface = nonempty(parse_opt(args, "--surface").or_else(|| env_lookup("LIMUX_SURFACE_ID")));
+    let pane = nonempty(parse_opt(args, "--pane").or_else(|| env_lookup("LIMUX_PANE_ID")));
     let direction = parse_opt(args, "--direction").unwrap_or_else(|| "right".to_string());
     let pane_type = parse_opt(args, "--type").unwrap_or_else(|| "terminal".to_string());
-    let url = parse_opt(args, "--url");
+    let command = nonempty(parse_opt(args, "--command"));
+    let url = nonempty(parse_opt(args, "--url"));
+
     let mut params = Map::new();
     params.insert("direction".to_string(), Value::String(direction));
     params.insert("type".to_string(), Value::String(pane_type));
+    if let Some(surface) = surface {
+        params.insert("surface_id".to_string(), Value::String(surface));
+    }
+    if let Some(pane) = pane {
+        params.insert("pane_id".to_string(), Value::String(pane));
+    }
+    if let Some(command) = command {
+        params.insert("command".to_string(), Value::String(command));
+    }
     if let Some(url) = url {
         params.insert("url".to_string(), Value::String(url));
     }
 
-    call_in_workspace_scope(client, workspace, "pane.create", Value::Object(params)).await
+    (workspace, Value::Object(params))
+}
+
+async fn run_new_pane(client: &mut Client, args: &[String]) -> Result<Value> {
+    // `pane.create` contract shared with the core dispatcher and live GTK host:
+    // direction/type are validated by the server, and responses keep
+    // pane_id/pane_ref/surface_id/surface_ref. Inside a Limux terminal,
+    // LIMUX_* defaults make `limux new-pane --command claude` split the
+    // caller's pane; outside Limux, omitting workspace preserves active-focus
+    // server behavior.
+    let (workspace, params) = build_new_pane_request(args, env_opt);
+    call_in_workspace_scope(client, workspace, "pane.create", params).await
 }
 
 async fn run_read_screen(client: &mut Client, args: &[String]) -> Result<Value> {
@@ -2515,5 +2546,87 @@ mod agent_team_tests {
         assert!(md.contains("limux notify"));
         assert!(md.contains("LIMUX_WORKSPACE_ID"));
         assert!(md.contains("LIMUX_SURFACE_ID"));
+    }
+}
+
+#[cfg(test)]
+mod new_pane_tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn test_env(name: &str) -> Option<String> {
+        match name {
+            "LIMUX_WORKSPACE_ID" => Some("workspace:agent".to_string()),
+            "LIMUX_SURFACE_ID" => Some("surface:11:tab-a".to_string()),
+            "LIMUX_PANE_ID" => Some("pane:11".to_string()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn new_pane_serializes_env_defaults_and_command() {
+        let (workspace, params) = build_new_pane_request(&args(&["--command", "claude"]), test_env);
+
+        assert_eq!(workspace.as_deref(), Some("workspace:agent"));
+        assert_eq!(
+            params,
+            json!({
+                "direction": "right",
+                "type": "terminal",
+                "surface_id": "surface:11:tab-a",
+                "pane_id": "pane:11",
+                "command": "claude"
+            })
+        );
+    }
+
+    #[test]
+    fn new_pane_flags_override_env_and_preserve_raw_refs() {
+        let (workspace, params) = build_new_pane_request(
+            &args(&[
+                "--workspace",
+                "raw-workspace",
+                "--surface",
+                "7:tab-b",
+                "--pane",
+                "7",
+                "--direction",
+                "down",
+                "--type",
+                "terminal",
+                "--command",
+                "codex --ask-for-approval never",
+            ]),
+            test_env,
+        );
+
+        assert_eq!(workspace.as_deref(), Some("raw-workspace"));
+        assert_eq!(
+            params,
+            json!({
+                "direction": "down",
+                "type": "terminal",
+                "surface_id": "7:tab-b",
+                "pane_id": "7",
+                "command": "codex --ask-for-approval never"
+            })
+        );
+    }
+
+    #[test]
+    fn new_pane_without_env_preserves_active_workspace_fallback() {
+        let (workspace, params) = build_new_pane_request(&args(&[]), |_| None);
+
+        assert_eq!(workspace, None);
+        assert_eq!(
+            params,
+            json!({
+                "direction": "right",
+                "type": "terminal"
+            })
+        );
     }
 }

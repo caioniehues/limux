@@ -129,7 +129,15 @@ limux agent-team --agents codex,claude --cwd "$PWD"
 # → Codex and Claude can now do:
 #   limux send --workspace claude $'<agent-msg from="codex" to="claude" id="…" ts="…">…</agent-msg>\n'
 
-# Or keep both agents in the same workspace on separate splits/tabs:
+# Or split the current agent's pane and launch another terminal agent.
+# Inside Limux, workspace/surface/pane default from LIMUX_*:
+limux new-pane --direction right --command claude
+
+# Explicit source targets are also accepted and serialized unchanged:
+limux new-pane --workspace "$LIMUX_WORKSPACE_ID" --surface "$LIMUX_SURFACE_ID" \
+  --pane "$LIMUX_PANE_ID" --direction down --command "codex"
+
+# Keep both agents in the same workspace on separate splits/tabs:
 limux identify --json
 limux list-panels --workspace "$LIMUX_WORKSPACE_ID"
 limux send --workspace "$LIMUX_WORKSPACE_ID" --surface "<peer-surface-id>" \
