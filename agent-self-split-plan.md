@@ -68,9 +68,30 @@ T6 ───────────────┘
   other's work.
 - **validation**: `git status --short` and targeted `git diff -- <file>` have
   been reviewed; implementation tasks know which files are already modified.
-- **status**: Not Completed
+- **status**: Completed
 - **log**:
+  - 2026-05-03: Preflight completed on branch `feat/cmux-parity`.
+  - Dirty-tree check found no pre-existing uncommitted files:
+    `git status --short` produced no output.
+  - Targeted diff check found no uncommitted changes in
+    `rust/limux-cli/src/main.rs`,
+    `rust/limux-host-linux/src/control_bridge.rs`,
+    `rust/limux-host-linux/src/window.rs`,
+    `rust/limux-host-linux/src/pane.rs`, or
+    `docs/cmux-parity-plan.md`: both `git diff --stat` and
+    `git diff -- <target files>` produced no output.
+  - Static bridge search verified current live-host route state:
+    `control_bridge.rs` `METHODS` includes `pane.list`, `pane.surfaces`,
+    `surface.list`, and `surface.send_key`; dispatch arms exist for those
+    methods. `pane.create` is not present in host `control_bridge.rs` yet.
+  - CLI/core path already references `pane.create` via `new-pane`
+    serialization in `rust/limux-cli/src/main.rs`; T1/T3 should add the
+    live GTK bridge contract/route without overwriting the existing
+    agent-comms routes.
+  - `reason_not_testable`: T0 is an inspection/preflight task with no
+    production behavior change. Verification is static command evidence only.
 - **files edited/created**:
+  - `agent-self-split-plan.md`
 
 ### T1: Define the self-split `pane.create` contract
 
