@@ -388,9 +388,29 @@ T6 ───────────────┘
   impractical, cover pure target-resolution helpers plus a live smoke script.
 - **validation**: `cargo test -p limux-cli` and the relevant host/core tests
   pass; failure output would catch a missing bridge route.
-- **status**: Not Completed
+- **status**: Completed
 - **log**:
+- 2026-05-03: Consolidated the regression evidence from the implementation
+  tasks: host `pane_create` tests cover parser routing, explicit
+  surface/pane targeting, active-workspace focus fallback, background
+  workspace first-pane fallback, invalid source errors, and direction-to-split
+  placement. Exact returned-surface command injection is covered by
+  `surface_hint_matches_only_exact_surface_or_tab_id`.
+- 2026-05-03: CLI tests cover env-derived `LIMUX_WORKSPACE_ID`,
+  `LIMUX_SURFACE_ID`, `LIMUX_PANE_ID`, explicit flag override, raw/ref source
+  preservation, `--command`, and no-env active-workspace fallback.
+- 2026-05-03: Core tests cover dispatcher compatibility for the self-split
+  contract refs and invalid contract values.
+- 2026-05-03: Live proof-file/env smoke remains for T10 because it requires a
+  running GTK host/socket. The exact smoke command is preserved in T10 and will
+  verify fresh `LIMUX_*` values from the spawned pane.
+- 2026-05-03: Validation passed:
+  `cargo test -p limux-host-linux pane_create`;
+  `cargo test -p limux-host-linux surface_hint_matches_only_exact_surface_or_tab_id`;
+  `cargo test -p limux-cli`;
+  `cargo test -p limux-core dispatcher_pane_create`.
 - **files edited/created**:
+  - `agent-self-split-plan.md`
 
 ### T9: Update roadmap, generated agent instructions, and smoke workflow
 
