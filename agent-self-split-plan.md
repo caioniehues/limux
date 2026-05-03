@@ -124,9 +124,33 @@ T6 ───────────────┘
   `direction` / `type` values return invalid params, not a silent fallback;
   source pane targeting and raw/ref ID parsing are specified before
   implementation starts.
-- **status**: Not Completed
+- **status**: Completed
 - **log**:
+  - 2026-05-03: Added the shared `pane.create` contract in
+    `control_bridge.rs`: workspace refs/raw IDs, source `pane_id`/`surface_id`,
+    direction, type, and command parse shape are documented; invalid
+    direction/type/browser-url combinations return invalid params before GTK
+    work is scheduled.
+  - 2026-05-03: Updated core `pane.create` to validate the same
+    direction/type/source fields and accept raw/ref workspace/pane/surface IDs
+    for compatibility. Core explicitly treats source pane, direction, and
+    command as live-host extensions while preserving `pane_id`, `pane_ref`,
+    `surface_id`, and `surface_ref` response fields.
+  - 2026-05-03: Added tests for host parser contract, core invalid
+    direction/type errors, ref/raw source IDs, and response field preservation.
+  - 2026-05-03: `reason_not_testable`: a TDD subagent RED phase was requested
+    but could not be spawned because the session agent thread limit was already
+    reached; local contract tests were added instead.
+  - 2026-05-03: Validation passed:
+    `cargo test -p limux-core dispatcher_pane_create`;
+    `cargo test -p limux-host-linux pane_create_contract`;
+    `cargo check -p limux-cli`;
+    `cargo check -p limux-host-linux`.
 - **files edited/created**:
+  - `agent-self-split-plan.md`
+  - `rust/limux-cli/src/main.rs`
+  - `rust/limux-core/src/lib.rs`
+  - `rust/limux-host-linux/src/control_bridge.rs`
 
 ### T2: Identify the caller's source pane and split orientation
 
@@ -142,12 +166,32 @@ T6 ───────────────┘
   Do not let a background agent split a random focused pane in another
   workspace. Map `left|right` to horizontal splits and `up|down` to vertical
   splits, using `new_pane_first=true` for `left|up`.
-- **validation**: Design notes or tests cover default source-pane selection,
-  explicit `LIMUX_SURFACE_ID` targeting, workspace-not-found, invalid
-  pane/surface, and no-pane edge cases.
-- **status**: Not Completed
+- **validation**: Completed with targeted host tests for direction-to-split
+  placement, explicit `surface:`/`LIMUX_SURFACE_ID` style targeting, explicit
+  pane targeting, active-workspace focused-pane selection, background-workspace
+  first-pane fallback, invalid surface/pane errors, and no-pane errors. The
+  live resolver returns `WorkspaceNotFound` before GTK work when the workspace
+  target cannot be resolved. `cargo test -p limux-host-linux pane_create`
+  passed; `cargo check -p limux-host-linux` passed. `cargo fmt --check` was not
+  run globally because T1 has parallel uncommitted changes in
+  `rust/limux-cli/src/main.rs`, `rust/limux-core/src/lib.rs`, and
+  `rust/limux-host-linux/src/control_bridge.rs`; T2 files were formatted
+  directly with `rustfmt rust/limux-host-linux/src/window.rs
+  rust/limux-host-linux/src/pane.rs`.
+- **status**: Completed
 - **log**:
+  - Added `resolve_pane_create_target` for later `ControlCommand::CreatePane`
+    handling. It resolves source panes in order: explicit surface, explicit
+    pane, focused pane only for the active workspace, then first pane fallback.
+  - Added `PaneCreateDirection` split placement mapping: `left|right` use
+    horizontal splits, `up|down` use vertical splits, and `left|up` place the
+    new pane first.
+  - Added a root-scoped `pane_widget_for_root` helper so later bridge code can
+    split the resolved GTK pane without scanning unrelated workspaces.
 - **files edited/created**:
+  - `rust/limux-host-linux/src/window.rs`
+  - `rust/limux-host-linux/src/pane.rs`
+  - `agent-self-split-plan.md`
 
 ### T3: Add `ControlCommand::CreatePane` and parser routing
 

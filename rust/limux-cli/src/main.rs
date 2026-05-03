@@ -672,7 +672,13 @@ async fn run_send(client: &mut Client, args: &[String]) -> Result<Value> {
         params.insert("surface_id".to_string(), Value::String(surface));
     }
 
-    call_in_workspace_scope(client, workspace, "surface.send_text", Value::Object(params)).await
+    call_in_workspace_scope(
+        client,
+        workspace,
+        "surface.send_text",
+        Value::Object(params),
+    )
+    .await
 }
 
 async fn run_send_key(client: &mut Client, args: &[String]) -> Result<Value> {
@@ -1230,6 +1236,11 @@ async fn run_new_surface(client: &mut Client, args: &[String]) -> Result<Value> 
 }
 
 async fn run_new_pane(client: &mut Client, args: &[String]) -> Result<Value> {
+    // `pane.create` contract shared with the core dispatcher and live GTK host:
+    // direction/type are validated by the server, responses keep
+    // pane_id/pane_ref/surface_id/surface_ref, and the agent-friendly
+    // --surface/--pane/--command plus LIMUX_* defaults are added by the
+    // follow-up CLI task without changing this method name.
     let workspace = parse_opt(args, "--workspace");
     let direction = parse_opt(args, "--direction").unwrap_or_else(|| "right".to_string());
     let pane_type = parse_opt(args, "--type").unwrap_or_else(|| "terminal".to_string());

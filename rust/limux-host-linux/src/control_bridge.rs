@@ -50,6 +50,50 @@ pub enum WorkspaceTarget {
     Index(usize),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PaneCreateDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PaneCreateType {
+    Terminal,
+    Browser,
+}
+
+/// Parser-level contract for the live-GTK `pane.create` route.
+///
+/// Request fields accepted by the bridge:
+/// - `workspace_id`/`id`, `name`, or `index` target the workspace. Raw
+///   handles and `workspace:<id>` refs are accepted and preserved for the GTK
+///   layer to resolve.
+/// - `surface_id` and `pane_id` identify the source pane. Raw handles and
+///   `surface:<id>`/`pane:<id>` refs are accepted. Later GTK work resolves
+///   precedence as explicit surface, explicit pane, then safe workspace-local
+///   fallback.
+/// - `direction` is one of `left|right|up|down`, defaulting to `right`.
+/// - `type` is one of `terminal|browser`, defaulting to `terminal`.
+/// - `command` is a terminal-only host extension: the host injects it into the
+///   newly-created surface after creation. The standalone core dispatcher may
+///   accept the field for compatibility but does not launch a process.
+///
+/// This delivery only implements live-GTK terminal panes. Browser pane support
+/// remains a follow-up, so `type=browser` and `url` fail at parse time before
+/// any GTK work is scheduled. Responses must keep the existing core/CLI field
+/// names: `pane_id`, `pane_ref`, `surface_id`, and `surface_ref`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatePaneRequest {
+    pub target: WorkspaceTarget,
+    pub source_pane_id: Option<String>,
+    pub source_surface_id: Option<String>,
+    pub direction: PaneCreateDirection,
+    pub pane_type: PaneCreateType,
+    pub command: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum ControlCommand {
     Identify {
@@ -210,6 +254,40 @@ fn optional_string(params: &Map<String, Value>, keys: &[&str]) -> Option<String>
     })
 }
 
+fn optional_handle(
+    params: &Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<String>, BridgeError> {
+    for key in keys {
+        let Some(value) = params.get(*key) else {
+            continue;
+        };
+        match value {
+            Value::Null => {}
+            Value::String(raw) => {
+                let handle = raw.trim();
+                if !handle.is_empty() {
+                    return Ok(Some(handle.to_string()));
+                }
+            }
+            Value::Number(number) => {
+                let id = number.as_u64().ok_or_else(|| {
+                    BridgeError::invalid_params(format!(
+                        "{key} must be a non-negative integer or ref handle"
+                    ))
+                })?;
+                return Ok(Some(id.to_string()));
+            }
+            _ => {
+                return Err(BridgeError::invalid_params(format!(
+                    "{key} must be a non-negative integer or ref handle"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn optional_index(params: &Map<String, Value>, key: &str) -> Result<Option<usize>, BridgeError> {
     let Some(value) = params.get(key) else {
         return Ok(None);
@@ -228,7 +306,7 @@ fn parse_optional_workspace_target(
     params: &Map<String, Value>,
     allow_name: bool,
 ) -> Result<WorkspaceTarget, BridgeError> {
-    if let Some(handle) = optional_string(params, &["workspace_id", "id"]) {
+    if let Some(handle) = optional_handle(params, &["workspace_id", "id"])? {
         return Ok(WorkspaceTarget::Handle(handle));
     }
     if allow_name {
@@ -240,6 +318,59 @@ fn parse_optional_workspace_target(
         return Ok(WorkspaceTarget::Index(index));
     }
     Ok(WorkspaceTarget::Active)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn parse_create_pane_request(
+    params: &Map<String, Value>,
+) -> Result<CreatePaneRequest, BridgeError> {
+    let direction = match optional_string(params, &["direction"])
+        .unwrap_or_else(|| "right".to_string())
+        .as_str()
+    {
+        "left" => PaneCreateDirection::Left,
+        "right" => PaneCreateDirection::Right,
+        "up" => PaneCreateDirection::Up,
+        "down" => PaneCreateDirection::Down,
+        _ => {
+            return Err(BridgeError::invalid_params(
+                "pane.create direction must be one of left|right|up|down",
+            ));
+        }
+    };
+
+    let pane_type = match optional_string(params, &["type"])
+        .unwrap_or_else(|| "terminal".to_string())
+        .as_str()
+    {
+        "terminal" => PaneCreateType::Terminal,
+        "browser" => PaneCreateType::Browser,
+        _ => {
+            return Err(BridgeError::invalid_params(
+                "pane.create type must be one of terminal|browser",
+            ));
+        }
+    };
+
+    if matches!(pane_type, PaneCreateType::Browser) {
+        return Err(BridgeError::invalid_params(
+            "pane.create live GTK bridge supports type=terminal only",
+        ));
+    }
+    if optional_string(params, &["url"]).is_some() {
+        return Err(BridgeError::invalid_params(
+            "pane.create url is only supported for browser panes",
+        ));
+    }
+
+    Ok(CreatePaneRequest {
+        target: parse_optional_workspace_target(params, true)?,
+        source_pane_id: optional_handle(params, &["pane_id"])?,
+        source_surface_id: optional_handle(params, &["surface_id"])?,
+        direction,
+        pane_type,
+        command: optional_string(params, &["command"]),
+    })
 }
 
 fn parse_required_workspace_target(
@@ -634,6 +765,53 @@ mod tests {
         let params = Map::new();
         let error = parse_required_workspace_target(&params, true, "workspace.select")
             .expect_err("workspace.select should require a target");
+        assert_eq!(error.code, INVALID_PARAMS_CODE);
+    }
+
+    #[test]
+    fn pane_create_contract_accepts_raw_and_ref_targets() {
+        let params = json!({
+            "workspace_id": 7,
+            "surface_id": "surface:11",
+            "pane_id": "12",
+            "direction": "left",
+            "type": "terminal",
+            "command": "claude"
+        });
+        let request = parse_create_pane_request(params.as_object().expect("object params"))
+            .expect("pane.create request should parse");
+
+        assert_eq!(request.target, WorkspaceTarget::Handle("7".to_string()));
+        assert_eq!(request.source_surface_id, Some("surface:11".to_string()));
+        assert_eq!(request.source_pane_id, Some("12".to_string()));
+        assert_eq!(request.direction, PaneCreateDirection::Left);
+        assert_eq!(request.pane_type, PaneCreateType::Terminal);
+        assert_eq!(request.command, Some("claude".to_string()));
+    }
+
+    #[test]
+    fn pane_create_contract_rejects_invalid_direction_and_type() {
+        let bad_direction = json!({ "direction": "diagonal" });
+        let error = parse_create_pane_request(bad_direction.as_object().expect("object params"))
+            .expect_err("invalid direction should fail");
+        assert_eq!(error.code, INVALID_PARAMS_CODE);
+
+        let bad_type = json!({ "type": "webview" });
+        let error = parse_create_pane_request(bad_type.as_object().expect("object params"))
+            .expect_err("invalid type should fail");
+        assert_eq!(error.code, INVALID_PARAMS_CODE);
+    }
+
+    #[test]
+    fn pane_create_contract_rejects_deferred_browser_fields() {
+        let browser = json!({ "type": "browser" });
+        let error = parse_create_pane_request(browser.as_object().expect("object params"))
+            .expect_err("browser panes are deferred");
+        assert_eq!(error.code, INVALID_PARAMS_CODE);
+
+        let url = json!({ "url": "https://example.com" });
+        let error = parse_create_pane_request(url.as_object().expect("object params"))
+            .expect_err("url is browser-only");
         assert_eq!(error.code, INVALID_PARAMS_CODE);
     }
 }
