@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -3651,39 +3652,7 @@ fn install_workspace_row_interactions(
 }
 
 fn add_workspace(state: &State, _working_directory: Option<&str>) {
-    let window = active_window(state);
-    let dialog = gtk::FileDialog::builder()
-        .title("Open Folder as Workspace")
-        .accept_label("Open")
-        .modal(true)
-        .build();
-
-    if let Some(home) = dirs::home_dir() {
-        let home_file = gtk::gio::File::for_path(&home);
-        dialog.set_initial_folder(Some(&home_file));
-    }
-
-    let state_for_native = state.clone();
-    let window_for_native = window.clone();
-    dialog.select_folder(
-        window.as_ref(),
-        None::<&gio::Cancellable>,
-        move |result| match result {
-            Ok(file) => {
-                create_workspace_from_file(&state_for_native, &file);
-            }
-            Err(err) if is_workspace_picker_cancel(&err) => {}
-            Err(err) => {
-                eprintln!(
-                    "limux: native workspace folder picker failed ({err}); falling back to legacy chooser"
-                );
-                show_legacy_workspace_folder_dialog(
-                    &state_for_native,
-                    window_for_native.as_ref(),
-                );
-            }
-        },
-    );
+    show_workspace_path_dialog(state);
 }
 
 fn active_window(state: &State) -> Option<gtk::Window> {
@@ -3693,55 +3662,150 @@ fn active_window(state: &State) -> Option<gtk::Window> {
         .and_then(|root| root.downcast::<gtk::Window>().ok())
 }
 
-fn create_workspace_from_file(state: &State, file: &gio::File) {
-    let Some(path) = file.path() else {
-        return;
-    };
-
-    let path_str = path.to_string_lossy().to_string();
-    let folder_name = path
-        .file_name()
-        .map(|segment| segment.to_string_lossy().to_string())
-        .unwrap_or_else(|| path_str.clone());
-    create_workspace_with_folder(state, &folder_name, &path_str);
-}
-
-fn is_workspace_picker_cancel(err: &glib::Error) -> bool {
-    matches!(
-        err.kind::<gtk::DialogError>(),
-        Some(gtk::DialogError::Cancelled | gtk::DialogError::Dismissed)
-    )
-}
-
-#[allow(deprecated)]
-fn show_legacy_workspace_folder_dialog(state: &State, window: Option<&gtk::Window>) {
-    let dialog = gtk::FileChooserDialog::new(
-        Some("Open Folder as Workspace"),
-        window,
-        gtk::FileChooserAction::SelectFolder,
-        &[
-            ("Cancel", gtk::ResponseType::Cancel),
-            ("Open", gtk::ResponseType::Accept),
-        ],
-    );
-    dialog.set_modal(true);
-
-    if let Some(home) = dirs::home_dir() {
-        let home_file = gtk::gio::File::for_path(&home);
-        let _ = dialog.set_current_folder(Some(&home_file));
+fn show_workspace_path_dialog(state: &State) {
+    let dialog = gtk::Window::builder()
+        .title("Open Folder as Workspace")
+        .modal(true)
+        .default_width(520)
+        .build();
+    if let Some(window) = active_window(state) {
+        dialog.set_transient_for(Some(&window));
     }
 
+    let default_folder = dirs::home_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let entry = gtk::Entry::builder()
+        .text(default_folder.to_string_lossy())
+        .hexpand(true)
+        .activates_default(true)
+        .build();
+    let error_label = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .visible(false)
+        .wrap(true)
+        .build();
+    error_label.add_css_class("error");
+
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    content.append(&entry);
+    content.append(&error_label);
+
+    let buttons = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .halign(gtk::Align::End)
+        .spacing(8)
+        .build();
+    let cancel_button = gtk::Button::with_label("Cancel");
+    let open_button = gtk::Button::with_label("Open");
+    open_button.add_css_class("suggested-action");
+    buttons.append(&cancel_button);
+    buttons.append(&open_button);
+    content.append(&buttons);
+    dialog.set_child(Some(&content));
+
+    entry.grab_focus();
+    entry.select_region(0, -1);
     let state = state.clone();
-    dialog.connect_response(move |dlg, response| {
-        if response == gtk::ResponseType::Accept {
-            if let Some(file) = dlg.file() {
-                create_workspace_from_file(&state, &file);
+    let entry_for_open = entry.clone();
+    let error_label = error_label.clone();
+    let dialog_for_open = dialog.clone();
+    open_button.connect_clicked(move |_| {
+        match validate_workspace_folder_input(entry_for_open.text().as_str()) {
+            Ok(selection) => {
+                create_workspace_with_folder(&state, &selection.name, selection.path_text.as_str());
+                dialog_for_open.close();
+            }
+            Err(message) => {
+                error_label.set_label(&message);
+                error_label.set_visible(true);
+                entry_for_open.grab_focus();
             }
         }
-        dlg.close();
     });
 
-    dialog.show();
+    let open_button_for_entry = open_button.clone();
+    entry.connect_activate(move |_| {
+        open_button_for_entry.emit_clicked();
+    });
+
+    let dialog_for_cancel = dialog.clone();
+    cancel_button.connect_clicked(move |_| {
+        dialog_for_cancel.close();
+    });
+
+    dialog.present();
+}
+
+#[derive(Debug)]
+struct WorkspaceFolderSelection {
+    name: String,
+    path_text: String,
+}
+
+fn validate_workspace_folder_input(input: &str) -> Result<WorkspaceFolderSelection, String> {
+    let home_dir = dirs::home_dir();
+    let current_dir = std::env::current_dir().ok();
+    validate_workspace_folder_input_with_dirs(input, home_dir.as_deref(), current_dir.as_deref())
+}
+
+fn validate_workspace_folder_input_with_dirs(
+    input: &str,
+    home_dir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> Result<WorkspaceFolderSelection, String> {
+    let path = workspace_folder_path_from_input(input, home_dir, current_dir)?;
+    let metadata =
+        std::fs::metadata(&path).map_err(|err| format!("Cannot open {}: {err}", path.display()))?;
+    if !metadata.is_dir() {
+        return Err(format!("{} is not a folder", path.display()));
+    }
+
+    let path_text = path.to_string_lossy().to_string();
+    let name = path
+        .file_name()
+        .map(|segment| segment.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| path_text.clone());
+    Ok(WorkspaceFolderSelection { name, path_text })
+}
+
+fn workspace_folder_path_from_input(
+    input: &str,
+    home_dir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Enter a folder path".to_string());
+    }
+
+    let expanded = if trimmed == "~" {
+        home_dir
+            .ok_or_else(|| "Home directory is unavailable".to_string())?
+            .to_path_buf()
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        home_dir
+            .ok_or_else(|| "Home directory is unavailable".to_string())?
+            .join(rest)
+    } else {
+        PathBuf::from(trimmed)
+    };
+
+    if expanded.is_absolute() {
+        Ok(expanded)
+    } else if let Some(current_dir) = current_dir {
+        Ok(current_dir.join(expanded))
+    } else {
+        Err("Current directory is unavailable".to_string())
+    }
 }
 
 fn create_workspace_with_folder(state: &State, name: &str, folder_path: &str) {
@@ -5750,7 +5814,8 @@ mod tests {
         shortcut_allowed_while_browser_find_active, shortcut_blocked_by_editable,
         shortcut_command_from_key_event, shortcut_dispatch_propagation,
         should_emit_desktop_notification, tab_drag_workspace_seed, use_opaque_window_background,
-        workspace_drop_layout_path, workspace_notification_message, Direction,
+        validate_workspace_folder_input_with_dirs, workspace_drop_layout_path,
+        workspace_folder_path_from_input, workspace_notification_message, Direction,
         EditableCaptureContext, NeighborScore, PaneBounds, PaneCreateDirection,
         PaneCreateTargetError, PortalColorSchemePreference, SessionSaveAccess, SessionSaveRequest,
         WorkspaceSeedSource, BASE_CSS, HOST_ENTRY_CSS_CLASS, WORKSPACE_RENAME_ENTRY_CSS_CLASS,
@@ -6511,5 +6576,54 @@ mod tests {
         assert_eq!(seed.name, "Browser");
         assert_eq!(seed.cwd.as_deref(), Some("/workspace-folder"));
         assert_eq!(seed.folder_path.as_deref(), Some("/workspace-folder"));
+    }
+
+    #[test]
+    fn workspace_folder_path_input_expands_home_and_relative_paths() {
+        let home = std::path::Path::new("/home/tester");
+        let current = std::path::Path::new("/tmp/current");
+
+        assert_eq!(
+            workspace_folder_path_from_input("~/project", Some(home), Some(current)).unwrap(),
+            std::path::PathBuf::from("/home/tester/project")
+        );
+        assert_eq!(
+            workspace_folder_path_from_input("relative", Some(home), Some(current)).unwrap(),
+            std::path::PathBuf::from("/tmp/current/relative")
+        );
+    }
+
+    #[test]
+    fn workspace_folder_path_input_rejects_empty_value() {
+        assert_eq!(
+            workspace_folder_path_from_input("  ", None, None).unwrap_err(),
+            "Enter a folder path"
+        );
+    }
+
+    #[test]
+    fn workspace_folder_validation_accepts_existing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let selection =
+            validate_workspace_folder_input_with_dirs(dir.path().to_str().unwrap(), None, None)
+                .unwrap();
+
+        assert_eq!(selection.path_text, dir.path().to_string_lossy());
+        assert_eq!(
+            selection.name,
+            dir.path().file_name().unwrap().to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn workspace_folder_validation_rejects_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-folder");
+        std::fs::write(&file, "content").unwrap();
+
+        let error = validate_workspace_folder_input_with_dirs(file.to_str().unwrap(), None, None)
+            .unwrap_err();
+
+        assert!(error.ends_with(" is not a folder"));
     }
 }
