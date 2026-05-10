@@ -18,6 +18,8 @@ GHOSTTY_SO="${ROOT_DIR}/ghostty/zig-out/lib/libghostty.so"
 MAX_GLIBC_VERSION="${LIMUX_MAX_GLIBC:-2.39}"
 GHOSTTY_SHARE_DIR=""
 GHOSTTY_TERMINFO_DIR=""
+WEBKITGTK_RUNTIME_DIR=""
+WEBKITGTK_PROCESS_DIR=""
 ICONS_DIR="${ROOT_DIR}/rust/limux-host-linux/icons"
 APP_ICONS_DIR="${ROOT_DIR}/rust/limux-host-linux/icons/app"
 DESKTOP_FILE="${ROOT_DIR}/rust/limux-host-linux/dev.limux.linux.desktop"
@@ -132,6 +134,8 @@ copy_ghostty_terminfo_entries() {
     fi
 }
 
+. "${ROOT_DIR}/scripts/appimage-webkit.sh"
+
 configure_ghostty_build_args() {
     if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists gtk4-layer-shell-0; then
         echo "gtk4-layer-shell not available via pkg-config; building Ghostty with bundled gtk4-layer-shell."
@@ -162,6 +166,12 @@ echo "GLIBC:   <= ${MAX_GLIBC_VERSION}"
 if ! command -v zig >/dev/null 2>&1; then
     echo "ERROR: zig not found in PATH."
     echo "Install Zig, then rerun ./scripts/package.sh"
+    exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 not found in PATH."
+    echo "Install Python 3, then rerun ./scripts/package.sh"
     exit 1
 fi
 
@@ -199,6 +209,20 @@ if ! GHOSTTY_TERMINFO_DIR="$(resolve_ghostty_terminfo_dir)"; then
     echo "  $(dirname "$GHOSTTY_SHARE_DIR")/terminfo"
     echo "  /usr/local/share/terminfo"
     echo "  /usr/share/terminfo"
+    exit 1
+fi
+
+if ! WEBKITGTK_RUNTIME_DIR="$(resolve_webkitgtk_runtime_dir)"; then
+    echo "ERROR: WebKitGTK 6 runtime directory not found."
+    echo "Install the runtime/development package before building release artifacts:"
+    echo "  Ubuntu/Debian: sudo apt install libwebkitgtk-6.0-dev"
+    echo "  Fedora:        sudo dnf install webkitgtk6.0-devel"
+    exit 1
+fi
+
+if ! WEBKITGTK_PROCESS_DIR="$(resolve_webkitgtk_process_dir)"; then
+    echo "ERROR: WebKitGTK 6 helper processes not found."
+    echo "Expected WebKitWebProcess from the WebKitGTK runtime package."
     exit 1
 fi
 
@@ -546,6 +570,9 @@ chmod 755 "$APPDIR/usr/bin/limux"
 cp "$GHOSTTY_SO" "$APPDIR/usr/lib/libghostty.so"
 strip --strip-debug "$APPDIR/usr/lib/libghostty.so"
 
+# WebKitGTK runtime, helper processes, and non-glibc library dependencies.
+copy_appimage_webkit_runtime "$APPDIR"
+
 # Ghostty resources required for named themes and shell integration
 cp -r "$GHOSTTY_SHARE_DIR" "$APPDIR/usr/share/limux/ghostty"
 
@@ -581,8 +608,11 @@ fi
 cat > "$APPDIR/AppRun" << 'APPRUN_EOF'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
+cd "$HERE"
 export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
 export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/share}"
+export WEBKIT_EXEC_PATH="${HERE}/usr/lib/webkitgtk-6.0"
+export WEBKIT_INJECTED_BUNDLE_PATH="${HERE}/usr/lib/webkitgtk-6.0/injected-bundle"
 exec "${HERE}/usr/bin/limux" "$@"
 APPRUN_EOF
 chmod 755 "$APPDIR/AppRun"

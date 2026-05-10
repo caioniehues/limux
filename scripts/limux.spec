@@ -9,6 +9,7 @@ URL:        https://github.com/am-will/limux
 Vendor:     Will R <will@limux.dev>
 ExclusiveArch: x86_64 aarch64
 AutoReq:    yes
+Requires:   webkitgtk6.0
 Source0:    limux-%{version}.tar.gz
 
 %description
