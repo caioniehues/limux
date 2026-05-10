@@ -37,7 +37,8 @@ static WAKEUP_IDLE_QUEUED: AtomicBool = AtomicBool::new(false);
 
 type TitleChangedCallback = dyn Fn(&str);
 type PwdChangedCallback = dyn Fn(&str);
-type DesktopNotificationCallback = dyn Fn(&str, &str);
+type DesktopNotificationCallback = dyn Fn(&str, &str, bool);
+type BellCallback = dyn Fn(bool);
 type VoidCallback = dyn Fn();
 type WidgetCallback = dyn Fn(&gtk::Widget);
 
@@ -48,7 +49,7 @@ struct SurfaceEntry {
     on_title_changed: Option<Box<TitleChangedCallback>>,
     on_pwd_changed: Option<Box<PwdChangedCallback>>,
     on_desktop_notification: Option<Box<DesktopNotificationCallback>>,
-    on_bell: Option<Box<VoidCallback>>,
+    on_bell: Option<Box<BellCallback>>,
     on_close: Option<Box<VoidCallback>>,
     clipboard_context: *mut ClipboardContext,
 }
@@ -578,7 +579,7 @@ unsafe extern "C" fn ghostty_action_cb(
                 SURFACE_MAP.with(|map| {
                     if let Some(entry) = map.borrow().get(&surface_key) {
                         if let Some(cb) = &entry.on_desktop_notification {
-                            cb(&title, &body);
+                            cb(&title, &body, entry.gl_area.is_focus());
                         }
                     }
                 });
@@ -611,7 +612,7 @@ unsafe extern "C" fn ghostty_action_cb(
                 SURFACE_MAP.with(|map| {
                     if let Some(entry) = map.borrow().get(&surface_key) {
                         if let Some(cb) = &entry.on_bell {
-                            cb();
+                            cb(entry.gl_area.is_focus());
                         }
                     }
                 });
@@ -846,7 +847,7 @@ pub struct TerminalCallbacks {
     pub on_title_changed: Box<TitleChangedCallback>,
     pub on_pwd_changed: Box<PwdChangedCallback>,
     pub on_desktop_notification: Box<DesktopNotificationCallback>,
-    pub on_bell: Box<VoidCallback>,
+    pub on_bell: Box<BellCallback>,
     pub on_close: Box<VoidCallback>,
     pub on_open_browser_here: Box<VoidCallback>,
     pub on_split_right: Box<VoidCallback>,
@@ -1144,16 +1145,16 @@ pub fn create_terminal(
                         })),
                         on_desktop_notification: Some(Box::new({
                             let cb = callbacks.clone();
-                            move |title, body| {
+                            move |title, body, source_focused| {
                                 let callbacks = cb.borrow();
-                                (callbacks.on_desktop_notification)(title, body);
+                                (callbacks.on_desktop_notification)(title, body, source_focused);
                             }
                         })),
                         on_bell: Some(Box::new({
                             let cb = callbacks.clone();
-                            move || {
+                            move |source_focused| {
                                 let callbacks = cb.borrow();
-                                (callbacks.on_bell)();
+                                (callbacks.on_bell)(source_focused);
                             }
                         })),
                         on_close: Some(Box::new({
