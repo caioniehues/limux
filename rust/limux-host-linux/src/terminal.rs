@@ -33,12 +33,14 @@ unsafe impl Sync for GhosttyState {}
 
 static GHOSTTY: OnceLock<GhosttyState> = OnceLock::new();
 static CURRENT_COLOR_SCHEME: AtomicI32 = AtomicI32::new(GHOSTTY_COLOR_SCHEME_LIGHT);
+static CURRENT_SCROLLBAR_ENABLED: AtomicBool = AtomicBool::new(true);
 static WAKEUP_IDLE_QUEUED: AtomicBool = AtomicBool::new(false);
 static EMPTY_CLIPBOARD_TEXT: [u8; 1] = [0];
 
 type TitleChangedCallback = dyn Fn(&str);
 type PwdChangedCallback = dyn Fn(&str);
-type DesktopNotificationCallback = dyn Fn(&str, &str);
+type DesktopNotificationCallback = dyn Fn(&str, &str, bool);
+type BellCallback = dyn Fn(bool);
 type VoidCallback = dyn Fn();
 type WidgetCallback = dyn Fn(&gtk::Widget);
 
@@ -46,10 +48,13 @@ type WidgetCallback = dyn Fn(&gtk::Widget);
 struct SurfaceEntry {
     gl_area: gtk::GLArea,
     toast_overlay: gtk::Overlay,
+    scrollbar: gtk::Scrollbar,
+    scrollbar_adjustment: gtk::Adjustment,
+    scrollbar_syncing: Rc<Cell<bool>>,
     on_title_changed: Option<Box<TitleChangedCallback>>,
     on_pwd_changed: Option<Box<PwdChangedCallback>>,
     on_desktop_notification: Option<Box<DesktopNotificationCallback>>,
-    on_bell: Option<Box<VoidCallback>>,
+    on_bell: Option<Box<BellCallback>>,
     on_close: Option<Box<VoidCallback>>,
     clipboard_context: *mut ClipboardContext,
 }
@@ -304,7 +309,7 @@ impl TerminalHandle {
 }
 
 pub struct TerminalWidget {
-    pub overlay: gtk::Overlay,
+    pub root: gtk::Widget,
     pub handle: TerminalHandle,
 }
 
@@ -397,6 +402,7 @@ pub fn init_ghostty() {
 
         let config = load_ghostty_config();
         let background_opacity = load_background_opacity(config);
+        CURRENT_SCROLLBAR_ENABLED.store(load_scrollbar_enabled(config), Ordering::Relaxed);
 
         let runtime_config = ghostty_runtime_config_s {
             userdata: ptr::null_mut(),
@@ -458,6 +464,21 @@ fn load_background_opacity(config: ghostty_config_t) -> f64 {
     } else {
         1.0
     }
+}
+
+fn load_scrollbar_enabled(config: ghostty_config_t) -> bool {
+    let mut value: *const c_char = ptr::null();
+    let key = b"scrollbar";
+    let loaded = unsafe {
+        ghostty_config_get(
+            config,
+            (&mut value as *mut *const c_char).cast::<c_void>(),
+            key.as_ptr().cast::<c_char>(),
+            key.len(),
+        )
+    };
+
+    !loaded || value.is_null() || unsafe { std::ffi::CStr::from_ptr(value) }.to_bytes() != b"never"
 }
 
 fn ghostty_color_scheme_for_dark_mode(dark: bool) -> c_int {
@@ -524,6 +545,31 @@ unsafe extern "C" fn ghostty_action_cb(
     let tag = action.tag;
 
     match tag {
+        GHOSTTY_ACTION_SCROLLBAR => {
+            if target.tag == GHOSTTY_TARGET_SURFACE {
+                let surface_key = unsafe { target.target.surface } as usize;
+                let scrollbar = unsafe { action.action.scrollbar };
+                SURFACE_MAP.with(|map| {
+                    if let Some(entry) = map.borrow().get(&surface_key) {
+                        entry.scrollbar_syncing.set(true);
+                        entry.scrollbar_adjustment.configure(
+                            scrollbar.offset as f64,
+                            0.0,
+                            scrollbar.total as f64,
+                            1.0,
+                            scrollbar.len as f64,
+                            scrollbar.len as f64,
+                        );
+                        entry.scrollbar_syncing.set(false);
+                        entry.scrollbar.set_visible(
+                            CURRENT_SCROLLBAR_ENABLED.load(Ordering::Relaxed)
+                                && scrollbar.total > scrollbar.len,
+                        );
+                    }
+                });
+            }
+            true
+        }
         GHOSTTY_ACTION_RENDER => {
             if target.tag == GHOSTTY_TARGET_SURFACE {
                 let surface_key = unsafe { target.target.surface } as usize;
@@ -579,7 +625,7 @@ unsafe extern "C" fn ghostty_action_cb(
                 SURFACE_MAP.with(|map| {
                     if let Some(entry) = map.borrow().get(&surface_key) {
                         if let Some(cb) = &entry.on_desktop_notification {
-                            cb(&title, &body);
+                            cb(&title, &body, entry.gl_area.is_focus());
                         }
                     }
                 });
@@ -612,7 +658,7 @@ unsafe extern "C" fn ghostty_action_cb(
                 SURFACE_MAP.with(|map| {
                     if let Some(entry) = map.borrow().get(&surface_key) {
                         if let Some(cb) = &entry.on_bell {
-                            cb();
+                            cb(entry.gl_area.is_focus());
                         }
                     }
                 });
@@ -636,6 +682,7 @@ unsafe extern "C" fn ghostty_action_cb(
         }
         GHOSTTY_ACTION_RELOAD_CONFIG => {
             let config = load_ghostty_config();
+            CURRENT_SCROLLBAR_ENABLED.store(load_scrollbar_enabled(config), Ordering::Relaxed);
             match target.tag {
                 GHOSTTY_TARGET_APP => unsafe {
                     ghostty_app_update_config(app, config);
@@ -881,7 +928,7 @@ pub struct TerminalCallbacks {
     pub on_title_changed: Box<TitleChangedCallback>,
     pub on_pwd_changed: Box<PwdChangedCallback>,
     pub on_desktop_notification: Box<DesktopNotificationCallback>,
-    pub on_bell: Box<VoidCallback>,
+    pub on_bell: Box<BellCallback>,
     pub on_close: Box<VoidCallback>,
     pub on_open_browser_here: Box<VoidCallback>,
     pub on_split_right: Box<VoidCallback>,
@@ -949,6 +996,7 @@ pub fn create_terminal(
     let callbacks = Rc::new(RefCell::new(callbacks));
     let surface_cell: Rc<RefCell<Option<ghostty_surface_t>>> = Rc::new(RefCell::new(None));
     let had_focus = Rc::new(Cell::new(false));
+    let scrollbar_syncing = Rc::new(Cell::new(false));
     let clipboard_context_cell: Rc<Cell<*mut ClipboardContext>> =
         Rc::new(Cell::new(ptr::null_mut()));
 
@@ -957,6 +1005,17 @@ pub fn create_terminal(
     overlay.set_child(Some(&gl_area));
     overlay.set_hexpand(true);
     overlay.set_vexpand(true);
+
+    let scrollbar_adjustment = gtk::Adjustment::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let scrollbar = gtk::Scrollbar::new(gtk::Orientation::Vertical, Some(&scrollbar_adjustment));
+    scrollbar.set_visible(false);
+    scrollbar.set_vexpand(true);
+
+    let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    root.set_hexpand(true);
+    root.set_vexpand(true);
+    root.append(&overlay);
+    root.append(&scrollbar);
 
     let search_entry = gtk::SearchEntry::builder()
         .hexpand(true)
@@ -1036,15 +1095,30 @@ pub fn create_terminal(
             }
         });
     }
+    {
+        let surface_cell = surface_cell.clone();
+        let scrollbar_syncing = scrollbar_syncing.clone();
+        scrollbar_adjustment.connect_value_changed(move |adj| {
+            if scrollbar_syncing.get() {
+                return;
+            }
+
+            let row = adj.value().round() as usize;
+            surface_action(*surface_cell.borrow(), &format!("scroll_to_row:{row}"));
+        });
+    }
 
     // On realize: create the Ghostty surface
     {
         let gl = gl_area.clone();
         let overlay_for_map = overlay.clone();
+        let scrollbar_for_map = scrollbar.clone();
+        let scrollbar_adjustment_for_map = scrollbar_adjustment.clone();
         let surface_cell = surface_cell.clone();
         let callbacks = callbacks.clone();
         let had_focus = had_focus.clone();
         let clipboard_context_cell = clipboard_context_cell.clone();
+        let scrollbar_syncing = scrollbar_syncing.clone();
         let extra_env = extra_env.clone();
         gl_area.connect_realize(move |gl_area| {
             gl_area.make_current();
@@ -1163,6 +1237,9 @@ pub fn create_terminal(
                     SurfaceEntry {
                         gl_area: gl.clone(),
                         toast_overlay: overlay_for_map.clone(),
+                        scrollbar: scrollbar_for_map.clone(),
+                        scrollbar_adjustment: scrollbar_adjustment_for_map.clone(),
+                        scrollbar_syncing: scrollbar_syncing.clone(),
                         on_title_changed: Some(Box::new({
                             let cb = callbacks.clone();
                             move |title| {
@@ -1179,16 +1256,16 @@ pub fn create_terminal(
                         })),
                         on_desktop_notification: Some(Box::new({
                             let cb = callbacks.clone();
-                            move |title, body| {
+                            move |title, body, source_focused| {
                                 let callbacks = cb.borrow();
-                                (callbacks.on_desktop_notification)(title, body);
+                                (callbacks.on_desktop_notification)(title, body, source_focused);
                             }
                         })),
                         on_bell: Some(Box::new({
                             let cb = callbacks.clone();
-                            move || {
+                            move |source_focused| {
                                 let callbacks = cb.borrow();
-                                (callbacks.on_bell)();
+                                (callbacks.on_bell)(source_focused);
                             }
                         })),
                         on_close: Some(Box::new({
@@ -1572,7 +1649,10 @@ pub fn create_terminal(
         });
     }
 
-    TerminalWidget { overlay, handle }
+    TerminalWidget {
+        root: root.upcast(),
+        handle,
+    }
 }
 
 // ---------------------------------------------------------------------------
