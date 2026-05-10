@@ -26,11 +26,16 @@ Download the latest release from [GitHub Releases](https://github.com/am-will/li
 sudo dpkg -i ./limux_0.1.14_amd64.deb
 ```
 
-**AppImage** — portable, no install needed:
+**AppImage** — portable across Ubuntu 24.04-era desktops and newer, no install needed:
 ```bash
 chmod +x Limux-0.1.14-x86_64.AppImage
 ./Limux-0.1.14-x86_64.AppImage
 ```
+
+Release AppImages are built and checked on the Ubuntu 24.04 `GLIBC_2.39`
+floor. Limux still uses the host GTK4, libadwaita, and WebKitGTK runtime
+libraries, so older distributions may need the `.deb`, tarball, or a source
+build with matching system packages instead.
 
 **Tarball** — manual install:
 ```bash
