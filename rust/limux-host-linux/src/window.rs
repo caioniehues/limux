@@ -2012,6 +2012,10 @@ fn dispatch_shortcut_command(state: &State, command: ShortcutCommand) -> bool {
             close_focused_tab(state);
             true
         }
+        ShortcutCommand::ToggleFocusedPaneZoom => {
+            toggle_focused_pane_zoom(state);
+            true
+        }
         ShortcutCommand::FocusLeft => {
             focus_pane_in_direction(state, Direction::Left);
             true
@@ -5077,6 +5081,22 @@ fn close_focused_tab(state: &State) {
             }
         }
         remove_pane(state, &ws_id, &pane_widget);
+    }
+}
+
+fn toggle_focused_pane_zoom(state: &State) {
+    let Some((ws_id, pane_widget)) = find_focused_pane(state) else {
+        return;
+    };
+    let container = {
+        let s = state.borrow();
+        s.workspaces
+            .iter()
+            .find(|workspace| workspace.id == ws_id)
+            .map(|workspace| workspace.split_container.clone())
+    };
+    if let Some(container) = container {
+        container.toggle_zoom(&pane_widget);
     }
 }
 

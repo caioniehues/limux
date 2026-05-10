@@ -118,6 +118,7 @@ These are the current supported config keys and defaults:
 | `new_terminal_in_focused_pane` | `<Ctrl><Shift>t` |
 | `split_right` | `<Ctrl>d` |
 | `close_focused_pane` | `<Ctrl>w` |
+| `toggle_focused_pane_zoom` | `<Ctrl><Shift>z` |
 | `new_terminal` | `<Ctrl>t` |
 | `focus_left` | `<Ctrl>Left` |
 | `focus_right` | `<Ctrl>Right` |

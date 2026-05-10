@@ -138,6 +138,7 @@ pub(crate) struct SplitTreeContainer {
     bin: gtk::Box,
     rebuild_source: RefCell<Option<glib::SourceId>>,
     last_focused: RefCell<Option<gtk::Widget>>,
+    zoomed_pane: RefCell<Option<gtk::Widget>>,
     state: State,
 }
 
@@ -156,6 +157,7 @@ impl SplitTreeContainer {
             bin,
             rebuild_source: RefCell::new(None),
             last_focused: RefCell::new(None),
+            zoomed_pane: RefCell::new(None),
             state: state.clone(),
         })
     }
@@ -175,6 +177,7 @@ impl SplitTreeContainer {
             bin,
             rebuild_source: RefCell::new(None),
             last_focused: RefCell::new(None),
+            zoomed_pane: RefCell::new(None),
             state: state.clone(),
         })
     }
@@ -194,6 +197,29 @@ impl SplitTreeContainer {
         self.tree.borrow().is_leaf()
     }
 
+    pub(crate) fn toggle_zoom(self: &Rc<Self>, target: &gtk::Widget) -> bool {
+        if self.zoomed_pane.borrow().is_some() {
+            self.restore_zoom();
+            false
+        } else {
+            self.zoom_pane(target);
+            true
+        }
+    }
+
+    fn zoom_pane(self: &Rc<Self>, target: &gtk::Widget) {
+        self.save_focus();
+        *self.zoomed_pane.borrow_mut() = Some(target.clone());
+        *self.last_focused.borrow_mut() = Some(target.clone());
+        self.trigger_rebuild();
+    }
+
+    fn restore_zoom(self: &Rc<Self>) {
+        self.save_focus();
+        self.zoomed_pane.borrow_mut().take();
+        self.trigger_rebuild();
+    }
+
     /// Split a pane. Mutates the data model, then triggers async rebuild.
     pub(crate) fn split(
         self: &Rc<Self>,
@@ -204,6 +230,7 @@ impl SplitTreeContainer {
         ratio: f64,
     ) {
         self.save_focus();
+        self.zoomed_pane.borrow_mut().take();
         *self.last_focused.borrow_mut() = Some(new_pane.clone());
 
         let shared_ratio = Rc::new(RefCell::new(layout_state::clamp_split_ratio(ratio)));
@@ -244,6 +271,7 @@ impl SplitTreeContainer {
     /// Remove a pane. Mutates the data model, then triggers async rebuild.
     pub(crate) fn remove(self: &Rc<Self>, target: &gtk::Widget) -> bool {
         self.save_focus();
+        self.zoomed_pane.borrow_mut().take();
 
         let removed = {
             let mut tree = self.tree.borrow_mut();
@@ -295,10 +323,15 @@ impl SplitTreeContainer {
         // the previous tree. GTK4 won't let us add them to new containers
         // until they're unparented. Detach them all first.
         let tree = self.tree.borrow();
-        detach_panes_from_old_tree(&tree);
-
-        let widget = build_widget_tree(&tree, &self.state);
-        self.bin.append(&widget);
+        let zoomed = self.zoomed_pane.borrow().clone();
+        if let Some(pane) = zoomed {
+            detach_pane_from_old_parent(&pane);
+            self.bin.append(&pane);
+        } else {
+            detach_panes_from_old_tree(&tree);
+            let widget = build_widget_tree(&tree, &self.state);
+            self.bin.append(&widget);
+        }
 
         // Newly created panes are tracked as pane containers rather than the
         // inner terminal/browser widget, so restore through the pane helper
@@ -356,6 +389,24 @@ fn detach_panes_from_old_tree(node: &SplitNode) {
         SplitNode::Split { left, right, .. } => {
             detach_panes_from_old_tree(left);
             detach_panes_from_old_tree(right);
+        }
+    }
+}
+
+fn detach_pane_from_old_parent(pane_widget: &gtk::Widget) {
+    if let Some(parent) = pane_widget.parent() {
+        if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            if paned
+                .start_child()
+                .map(|child| child == *pane_widget)
+                .unwrap_or(false)
+            {
+                paned.set_start_child(gtk::Widget::NONE);
+            } else {
+                paned.set_end_child(gtk::Widget::NONE);
+            }
+        } else if let Some(container) = parent.downcast_ref::<gtk::Box>() {
+            container.remove(pane_widget);
         }
     }
 }

@@ -29,6 +29,7 @@ pub enum ShortcutId {
     NewTerminalInFocusedPane,
     SplitRight,
     CloseFocusedPane,
+    ToggleFocusedPaneZoom,
     NewTerminal,
     FocusLeft,
     FocusRight,
@@ -80,6 +81,7 @@ pub enum ShortcutCommand {
     NewTerminal,
     SplitRight,
     CloseFocusedPane,
+    ToggleFocusedPaneZoom,
     FocusLeft,
     FocusRight,
     FocusUp,
@@ -309,7 +311,7 @@ struct ShortcutConfigFile {
     shortcuts: HashMap<String, serde_json::Value>,
 }
 
-const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 47] = [
+const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 48] = [
     ShortcutDefinition {
         id: ShortcutId::NewWorkspace,
         config_key: "new_workspace",
@@ -472,6 +474,17 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 47] = [
         label: "Close Focused Pane",
         registers_gtk_accel: false,
         command: ShortcutCommand::CloseFocusedPane,
+        scope: ShortcutScope::Window,
+        editable_capture_policy: EditableCapturePolicy::BypassInEditable,
+    },
+    ShortcutDefinition {
+        id: ShortcutId::ToggleFocusedPaneZoom,
+        config_key: "toggle_focused_pane_zoom",
+        action_name: "win.toggle-focused-pane-zoom",
+        default_accel: "<Ctrl><Shift>z",
+        label: "Toggle Focused Pane Zoom",
+        registers_gtk_accel: false,
+        command: ShortcutCommand::ToggleFocusedPaneZoom,
         scope: ShortcutScope::Window,
         editable_capture_policy: EditableCapturePolicy::BypassInEditable,
     },
@@ -1823,6 +1836,26 @@ mod tests {
                 .find_by_id(ShortcutId::NewTerminal)
                 .and_then(ResolvedShortcut::gtk_accel),
             None
+        );
+    }
+
+    #[test]
+    fn focused_pane_zoom_shortcut_is_remappable_window_command() {
+        let defaults = default_shortcuts();
+        let shortcut = defaults
+            .find_by_id(ShortcutId::ToggleFocusedPaneZoom)
+            .expect("focused pane zoom shortcut should be registered");
+
+        assert_eq!(shortcut.definition.config_key, "toggle_focused_pane_zoom");
+        assert_eq!(
+            shortcut.definition.command,
+            ShortcutCommand::ToggleFocusedPaneZoom
+        );
+        assert_eq!(shortcut.definition.scope, ShortcutScope::Window);
+        assert_eq!(shortcut.runtime_combo().as_deref(), Some("ctrl+shift+z"));
+        assert_eq!(
+            defaults.command_for_runtime_combo("ctrl+shift+z"),
+            Some(ShortcutCommand::ToggleFocusedPaneZoom)
         );
     }
 
