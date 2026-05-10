@@ -35,6 +35,7 @@ static GHOSTTY: OnceLock<GhosttyState> = OnceLock::new();
 static CURRENT_COLOR_SCHEME: AtomicI32 = AtomicI32::new(GHOSTTY_COLOR_SCHEME_LIGHT);
 static CURRENT_SCROLLBAR_ENABLED: AtomicBool = AtomicBool::new(true);
 static WAKEUP_IDLE_QUEUED: AtomicBool = AtomicBool::new(false);
+static EMPTY_CLIPBOARD_TEXT: [u8; 1] = [0];
 
 type TitleChangedCallback = dyn Fn(&str);
 type PwdChangedCallback = dyn Fn(&str);
@@ -716,6 +717,43 @@ unsafe fn clipboard_surface_from_userdata(userdata: *mut c_void) -> Option<ghost
     }
 }
 
+fn clipboard_read_text_cstring(text: Option<&str>) -> CString {
+    CString::new(text.unwrap_or_default().replace('\0', ""))
+        .expect("clipboard text should not contain NUL bytes")
+}
+
+fn clipboard_completion_text_ptr(text: *const c_char) -> *const c_char {
+    if text.is_null() {
+        EMPTY_CLIPBOARD_TEXT.as_ptr().cast()
+    } else {
+        text
+    }
+}
+
+fn surface_is_registered(surface: ghostty_surface_t) -> bool {
+    SURFACE_MAP.with(|map| map.borrow().contains_key(&(surface as usize)))
+}
+
+unsafe fn complete_clipboard_request(
+    surface: ghostty_surface_t,
+    text: *const c_char,
+    state: *mut c_void,
+    confirmed: bool,
+) {
+    if !surface_is_registered(surface) {
+        return;
+    }
+
+    unsafe {
+        ghostty_surface_complete_clipboard_request(
+            surface,
+            clipboard_completion_text_ptr(text),
+            state,
+            confirmed,
+        );
+    }
+}
+
 unsafe extern "C" fn ghostty_read_clipboard_cb(
     userdata: *mut c_void,
     clipboard_type: c_int,
@@ -728,23 +766,20 @@ unsafe extern "C" fn ghostty_read_clipboard_cb(
 
     let display = match gtk::gdk::Display::default() {
         Some(d) => d,
-        None => return,
+        None => {
+            unsafe {
+                complete_clipboard_request(surface_ptr, ptr::null(), state, true);
+            }
+            return;
+        }
     };
     let clipboard = clipboard_from_type(&display, clipboard_type);
 
     clipboard.read_text_async(gtk::gio::Cancellable::NONE, move |result| {
-        // Get clipboard text, defaulting to empty string on failure
-        let text = result
-            .ok()
-            .flatten()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        // Replace interior null bytes so CString doesn't fail
-        let clean = text.replace('\0', "");
-        if let Ok(cstr) = CString::new(clean) {
-            unsafe {
-                ghostty_surface_complete_clipboard_request(surface_ptr, cstr.as_ptr(), state, true);
-            }
+        let text = result.ok().flatten().map(|s| s.to_string());
+        let cstr = clipboard_read_text_cstring(text.as_deref());
+        unsafe {
+            complete_clipboard_request(surface_ptr, cstr.as_ptr(), state, true);
         }
     });
 }
@@ -812,7 +847,7 @@ unsafe extern "C" fn ghostty_confirm_read_clipboard_cb(
         None => return,
     };
     unsafe {
-        ghostty_surface_complete_clipboard_request(surface_ptr, text, state, true);
+        complete_clipboard_request(surface_ptr, text, state, true);
     }
 }
 
@@ -2142,6 +2177,35 @@ mod tests {
             ["text/plain", "text/plain;charset=utf-8"]
         ));
         assert!(clipboard_formats_include_image(["image/png", "text/plain"]));
+    }
+
+    #[test]
+    fn clipboard_read_text_defaults_to_empty_when_missing() {
+        let text = clipboard_read_text_cstring(None);
+
+        assert_eq!(text.to_bytes_with_nul(), b"\0");
+    }
+
+    #[test]
+    fn clipboard_read_text_strips_nul_bytes() {
+        let text = clipboard_read_text_cstring(Some("a\0b\0c"));
+
+        assert_eq!(text.to_bytes(), b"abc");
+    }
+
+    #[test]
+    fn clipboard_completion_text_replaces_null_with_empty_cstr() {
+        let text = clipboard_completion_text_ptr(ptr::null());
+        let text = unsafe { std::ffi::CStr::from_ptr(text) };
+
+        assert_eq!(text.to_bytes(), b"");
+    }
+
+    #[test]
+    fn clipboard_completion_text_keeps_non_null_ptr() {
+        let text = CString::new("clipboard").unwrap();
+
+        assert_eq!(clipboard_completion_text_ptr(text.as_ptr()), text.as_ptr());
     }
 
     #[test]
