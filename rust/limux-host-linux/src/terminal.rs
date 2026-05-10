@@ -857,6 +857,7 @@ pub struct TerminalCallbacks {
 pub struct TerminalOptions {
     pub hover_focus: Rc<dyn Fn() -> bool>,
     pub saved_font_size: Option<f32>,
+    pub startup_command: Option<String>,
     /// Extra environment variables to expose to the spawned shell
     /// (e.g. `LIMUX_WORKSPACE_ID`, `LIMUX_SURFACE_ID`, `LIMUX_PANE_ID`, `LIMUX_SOCKET`).
     ///
@@ -872,6 +873,7 @@ impl Default for TerminalOptions {
         Self {
             hover_focus: Rc::new(|| false),
             saved_font_size: None,
+            startup_command: None,
             extra_env: Vec::new(),
         }
     }
@@ -906,6 +908,7 @@ pub fn create_terminal(
 
     let wd = working_directory.map(|s| s.to_string());
     let saved_font_size = options.saved_font_size;
+    let startup_command = options.startup_command;
     let hover_focus = options.hover_focus;
     let extra_env = options.extra_env;
     let callbacks = Rc::new(RefCell::new(callbacks));
@@ -1067,6 +1070,17 @@ pub fn create_terminal(
             if !env_vars_raw.is_empty() {
                 config.env_vars = env_vars_raw.as_mut_ptr();
                 config.env_var_count = env_vars_raw.len();
+            }
+
+            let c_startup_command = startup_command
+                .as_ref()
+                .and_then(|command| CString::new(command.as_str()).ok());
+            if let Some(ref command) = c_startup_command {
+                config.command = command.as_ptr();
+                eprintln!(
+                    "limux: starting restored terminal command={}",
+                    command.to_string_lossy()
+                );
             }
 
             let surface = unsafe { ghostty_surface_new(app, &config) };

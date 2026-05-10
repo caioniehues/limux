@@ -17,7 +17,9 @@ use webkit6::prelude::*;
 
 use crate::app_config::AppConfig;
 use crate::keybind_editor;
-use crate::layout_state::{PaneState, TabContentState, TabState as SavedTabState};
+use crate::layout_state::{
+    PaneState, RestorableAgentState, TabContentState, TabState as SavedTabState,
+};
 use crate::settings_editor;
 use crate::shortcut_config::{NormalizedShortcut, ResolvedShortcutConfig, ShortcutId};
 use crate::terminal::{self, TerminalCallbacks};
@@ -868,6 +870,7 @@ struct TerminalTabOptions<'a> {
     custom_name: Option<&'a str>,
     pinned: bool,
     cwd: Option<&'a str>,
+    agent: Option<RestorableAgentState>,
 }
 
 struct BrowserTabOptions<'a> {
@@ -901,7 +904,7 @@ fn restore_tabs_from_state(
 
     for saved_tab in &saved_state.tabs {
         match &saved_tab.content {
-            TabContentState::Terminal { cwd } => add_terminal_tab_inner(
+            TabContentState::Terminal { cwd, agent } => add_terminal_tab_inner(
                 internals,
                 cwd.as_deref().or(working_directory),
                 Some(TerminalTabOptions {
@@ -909,6 +912,7 @@ fn restore_tabs_from_state(
                     custom_name: saved_tab.custom_name.as_deref(),
                     pinned: saved_tab.pinned,
                     cwd: cwd.as_deref().or(working_directory),
+                    agent: agent.clone(),
                 }),
             ),
             TabContentState::Browser { uri } => add_browser_tab_inner(
@@ -1124,12 +1128,23 @@ fn add_terminal_tab_inner(
     {
         extra_env.push(("LIMUX_SOCKET".to_string(), sock.to_string()));
     }
+    let startup_command = options
+        .as_ref()
+        .and_then(|value| value.agent.as_ref())
+        .and_then(|agent| agent.resume_command());
+    if let Some(command) = startup_command.as_deref() {
+        eprintln!(
+            "limux: restoring agent terminal surface={}:{} command={}",
+            internals.pane_id, tab_id, command
+        );
+    }
 
     let term = terminal::create_terminal(
         working_directory,
         terminal::TerminalOptions {
             hover_focus,
             saved_font_size: (internals.callbacks.current_config)().borrow().font_size,
+            startup_command,
             extra_env,
         },
         term_callbacks,
@@ -1450,6 +1465,7 @@ pub fn snapshot_pane_state(pane_widget: &gtk::Widget) -> Option<PaneState> {
             let content = match &entry.kind {
                 TabKind::Terminal { state } => TabContentState::Terminal {
                     cwd: state.cwd.borrow().clone(),
+                    agent: None,
                 },
                 TabKind::Browser { state } => TabContentState::Browser {
                     uri: state.uri.borrow().clone(),
@@ -1465,6 +1481,7 @@ pub fn snapshot_pane_state(pane_widget: &gtk::Widget) -> Option<PaneState> {
         })
         .collect();
     Some(PaneState {
+        pane_id: Some(internals.pane_id),
         active_tab_id: ts.active_tab.clone(),
         tabs,
     })

@@ -14,6 +14,8 @@ use serde_json::{json, Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+mod agent_hooks;
+
 const CLI_STATE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const CLI_STATE_LOCK_RETRY: Duration = Duration::from_millis(25);
 
@@ -197,7 +199,7 @@ fn parse_global_args() -> Result<GlobalOptions> {
 
 fn print_help() {
     println!(
-        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--pane <id|ref>] [--surface <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--command <text>] [--url <url>]\n      Live GTK self-spawn currently supports terminal panes only; browser panes remain deferred.\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Splits the active workspace into one pane per agent (caller's pane stays\n      as the orchestrator on the left, peers stack down the right), launches\n      each CLI in its pane, and writes AGENTS.md describing the <agent-msg>\n      XML protocol so peers can talk via\n      `limux send --surface <peer-surface-id> <envelope>`.\n"
+        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--pane <id|ref>] [--surface <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--command <text>] [--url <url>]\n      Live GTK self-spawn currently supports terminal panes only; browser panes remain deferred.\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  hooks setup [agent] | hooks uninstall [agent] | hooks <agent> <event>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Splits the active workspace into one pane per agent (caller's pane stays\n      as the orchestrator on the left, peers stack down the right), launches\n      each CLI in its pane, and writes AGENTS.md describing the <agent-msg>\n      XML protocol so peers can talk via\n      `limux send --surface <peer-surface-id> <envelope>`.\n"
     );
 }
 
@@ -286,6 +288,29 @@ fn parse_opt(args: &[String], name: &str) -> Option<String> {
 
 fn parse_flag(args: &[String], name: &str) -> bool {
     args.iter().any(|a| a == name)
+}
+
+fn positional_arg(args: &[String], index: usize) -> Option<String> {
+    let mut position = 0usize;
+    let mut skip = false;
+    for arg in args {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if arg == "--agent" {
+            skip = true;
+            continue;
+        }
+        if arg.starts_with('-') {
+            continue;
+        }
+        if position == index {
+            return Some(arg.clone());
+        }
+        position += 1;
+    }
+    None
 }
 
 fn trailing_title(args: &[String]) -> Option<String> {
@@ -776,23 +801,6 @@ async fn run_notify(client: &mut Client, args: &[String]) -> Result<Value> {
 // OpenCode and Gemini use slightly different names; we fall back gracefully
 // when fields are missing.
 
-#[derive(Clone, Copy, Debug)]
-enum AgentKind {
-    Claude,
-    OpenCode,
-    Gemini,
-}
-
-impl AgentKind {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Claude => "Claude",
-            Self::OpenCode => "OpenCode",
-            Self::Gemini => "Gemini",
-        }
-    }
-}
-
 /// Pull a string field from the hook JSON, trying multiple keys.
 fn hook_str<'a>(payload: &'a Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
@@ -813,7 +821,11 @@ fn parse_hook_event(args: &[String], payload: &Value) -> String {
 /// Args:
 ///   [event_name] — optional positional, e.g. "Notification", "Stop".
 ///                  If omitted, we read `hook_event_name` from the JSON.
-async fn run_agent_hook(client: &mut Client, agent: AgentKind, args: &[String]) -> Result<Value> {
+async fn run_agent_hook(
+    client: &mut Client,
+    agent: agent_hooks::AgentKind,
+    args: &[String],
+) -> Result<Value> {
     use std::io::Read;
 
     // Read stdin (hook JSON). If stdin is empty or not JSON, treat as
@@ -832,6 +844,7 @@ async fn run_agent_hook(client: &mut Client, agent: AgentKind, args: &[String]) 
 
     // Build a human-friendly title + body depending on event + agent.
     let agent_label = agent.label();
+    persist_agent_hook_session(agent, args, &payload, &event)?;
     let (title, body) = match event.as_str() {
         "Notification" => (
             format!("{agent_label} needs you"),
@@ -900,13 +913,920 @@ async fn run_agent_hook(client: &mut Client, agent: AgentKind, args: &[String]) 
         params.insert("body".to_string(), Value::String(body));
     }
 
-    call_in_workspace_scope(
+    let _ = call_in_workspace_scope(
         client,
         workspace,
         "notification.create",
         Value::Object(params),
     )
-    .await
+    .await;
+
+    Ok(agent_hook_output(&event, &payload))
+}
+
+fn agent_hook_output(event: &str, payload: &Value) -> Value {
+    let canonical_event = canonical_hook_event_name(event);
+    let mut output = Map::new();
+    output.insert("continue".to_string(), Value::Bool(true));
+    output.insert("suppressOutput".to_string(), Value::Bool(false));
+
+    if matches!(canonical_event, Some("SessionStart" | "UserPromptSubmit")) {
+        let mut specific = Map::new();
+        specific.insert(
+            "hookEventName".to_string(),
+            Value::String(
+                canonical_event
+                    .expect("matched canonical event")
+                    .to_string(),
+            ),
+        );
+        if let Some(context) = hook_additional_context(payload) {
+            specific.insert("additionalContext".to_string(), Value::String(context));
+        }
+        output.insert("hookSpecificOutput".to_string(), Value::Object(specific));
+    }
+
+    Value::Object(output)
+}
+
+fn canonical_hook_event_name(event: &str) -> Option<&'static str> {
+    match event {
+        "SessionStart" | "session-start" => Some("SessionStart"),
+        "UserPromptSubmit" | "prompt-submit" => Some("UserPromptSubmit"),
+        "Stop" | "stop" | "Notification" => Some("Stop"),
+        "SessionEnd" | "session-end" => None,
+        "Cleanup" | "cleanup" | "restore-exit" => None,
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentHookPersistenceAction {
+    Upsert,
+    Preserve,
+    Remove,
+}
+
+fn agent_hook_persistence_action(event: &str) -> AgentHookPersistenceAction {
+    match event {
+        "Cleanup" | "cleanup" | "restore-exit" => AgentHookPersistenceAction::Remove,
+        "SessionEnd" | "session-end" => AgentHookPersistenceAction::Preserve,
+        _ => AgentHookPersistenceAction::Upsert,
+    }
+}
+
+fn hook_additional_context(payload: &Value) -> Option<String> {
+    hook_str(payload, &["additional_context", "additionalContext"])
+        .map(str::to_owned)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn persist_agent_hook_session(
+    agent: agent_hooks::AgentKind,
+    args: &[String],
+    payload: &Value,
+    event: &str,
+) -> Result<()> {
+    let Some(session_id) = hook_session_id(payload) else {
+        write_agent_hook_debug(
+            agent,
+            event,
+            "skip_missing_session_id",
+            &json!({
+                "payload_keys": payload_keys(payload),
+                "has_claude_code_session_env": limux_env_value("CLAUDE_CODE_SESSION_ID").is_some(),
+                "has_claude_session_env": limux_env_value("CLAUDE_SESSION_ID").is_some(),
+            }),
+        );
+        return Ok(());
+    };
+
+    let store = agent_hooks::AgentHookSessionStore::new(agent);
+    match agent_hook_persistence_action(event) {
+        AgentHookPersistenceAction::Remove => {
+            let result = store.remove(&session_id);
+            if result.is_ok() {
+                write_agent_hook_debug(
+                    agent,
+                    event,
+                    "removed",
+                    &json!({
+                        "session_id": session_id,
+                        "payload_keys": payload_keys(payload),
+                    }),
+                );
+            }
+            return result;
+        }
+        AgentHookPersistenceAction::Preserve => {
+            write_agent_hook_debug(
+                agent,
+                event,
+                "preserved",
+                &json!({
+                    "session_id": session_id,
+                    "payload_keys": payload_keys(payload),
+                }),
+            );
+            return Ok(());
+        }
+        AgentHookPersistenceAction::Upsert => {}
+    }
+
+    let workspace_id = parse_opt(args, "--workspace")
+        .or_else(|| limux_env_value("LIMUX_WORKSPACE_ID"))
+        .filter(|value| !value.trim().is_empty());
+    let surface_id = parse_opt(args, "--surface")
+        .or_else(|| limux_env_value("LIMUX_SURFACE_ID"))
+        .filter(|value| !value.trim().is_empty());
+    let (Some(workspace_id), Some(surface_id)) = (workspace_id, surface_id) else {
+        write_agent_hook_debug(
+            agent,
+            event,
+            "skip_missing_limux_target",
+            &json!({
+                "session_id": session_id,
+                "has_workspace_arg": parse_opt(args, "--workspace").is_some(),
+                "has_surface_arg": parse_opt(args, "--surface").is_some(),
+                "has_workspace_env": limux_env_value("LIMUX_WORKSPACE_ID").is_some(),
+                "has_surface_env": limux_env_value("LIMUX_SURFACE_ID").is_some(),
+                "payload_keys": payload_keys(payload),
+            }),
+        );
+        return Ok(());
+    };
+
+    let existing = store.lookup(&session_id)?;
+    let cwd = hook_str(payload, &["cwd", "working_directory", "directory"])
+        .map(str::to_string)
+        .or_else(|| existing.as_ref().and_then(|record| record.cwd.clone()));
+    let pid = hook_str(payload, &["pid"])
+        .and_then(|value| value.parse::<u32>().ok())
+        .or_else(|| agent_ancestor_pid(agent))
+        .or_else(|| existing.as_ref().and_then(|record| record.pid));
+    let launch_command = agent_hooks::launch_record_from_env(agent, cwd.as_deref()).or_else(|| {
+        existing
+            .as_ref()
+            .and_then(|record| record.launch_command.clone())
+    });
+
+    let record = agent_hooks::AgentHookSessionRecord {
+        session_id,
+        workspace_id,
+        surface_id,
+        cwd,
+        pid,
+        launch_command,
+        updated_at: agent_hooks::now_seconds(),
+    };
+    let result = store.upsert(record);
+    if result.is_ok() {
+        write_agent_hook_debug(
+            agent,
+            event,
+            "upserted",
+            &json!({
+                "payload_keys": payload_keys(payload),
+            }),
+        );
+    }
+    result
+}
+
+fn hook_session_id(payload: &Value) -> Option<String> {
+    hook_str(payload, &["session_id", "sessionId", "sessionID"])
+        .map(str::to_string)
+        .or_else(|| limux_env_value("CLAUDE_CODE_SESSION_ID"))
+        .or_else(|| limux_env_value("CLAUDE_SESSION_ID"))
+        .or_else(|| hook_session_id_from_transcript(payload))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn hook_session_id_from_transcript(payload: &Value) -> Option<String> {
+    let transcript = hook_str(
+        payload,
+        &["transcript_path", "transcriptPath", "transcript"],
+    )?;
+    Path::new(transcript)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn payload_keys(payload: &Value) -> Vec<String> {
+    payload
+        .as_object()
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn write_agent_hook_debug(
+    agent: agent_hooks::AgentKind,
+    event: &str,
+    outcome: &str,
+    details: &Value,
+) {
+    let Some(dir) = agent_hook_debug_dir() else {
+        return;
+    };
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("agent-hook-debug.jsonl");
+    let line = json!({
+        "time": agent_hooks::now_seconds(),
+        "agent": agent.store_name(),
+        "event": event,
+        "outcome": outcome,
+        "details": details,
+    });
+    if let Ok(mut encoded) = serde_json::to_vec(&line) {
+        encoded.push(b'\n');
+        let _ = append_debug_line(&path, &encoded);
+    }
+}
+
+fn agent_hook_debug_dir() -> Option<PathBuf> {
+    if let Some(dir) = env::var_os("LIMUX_AGENT_HOOK_STATE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    dirs::state_dir()
+        .map(|dir| dir.join("limux"))
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/state/limux")))
+}
+
+fn append_debug_line(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("failed to append {}", path.display()))
+}
+
+fn limux_env_value(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| ancestor_env_value(name))
+}
+
+#[cfg(target_os = "linux")]
+fn agent_ancestor_pid(agent: agent_hooks::AgentKind) -> Option<u32> {
+    let needle = agent.store_name();
+    let mut pid = std::process::id();
+    for _ in 0..8 {
+        let parent = proc_parent_pid(pid)?;
+        if parent <= 1 || parent == pid {
+            return None;
+        }
+        if proc_identity_contains(parent, needle) {
+            return Some(parent);
+        }
+        pid = parent;
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn agent_ancestor_pid(_agent: agent_hooks::AgentKind) -> Option<u32> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn proc_identity_contains(pid: u32, needle: &str) -> bool {
+    let needle = needle.to_ascii_lowercase();
+    proc_cmdline(pid)
+        .or_else(|| fs::read_to_string(format!("/proc/{pid}/comm")).ok())
+        .map(|value| value.to_ascii_lowercase().contains(&needle))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn proc_cmdline(pid: u32) -> Option<String> {
+    let raw = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let parts = raw
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| std::str::from_utf8(part).ok())
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+#[cfg(target_os = "linux")]
+fn ancestor_env_value(name: &str) -> Option<String> {
+    let mut pid = std::process::id();
+    for _ in 0..8 {
+        let parent = proc_parent_pid(pid)?;
+        if parent <= 1 || parent == pid {
+            return None;
+        }
+        if let Some(value) = proc_env_value(parent, name) {
+            return Some(value);
+        }
+        pid = parent;
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ancestor_env_value(_name: &str) -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn proc_parent_pid(pid: u32) -> Option<u32> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_proc_stat_parent_pid(&stat)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_stat_parent_pid(stat: &str) -> Option<u32> {
+    let close = stat.rfind(')')?;
+    let mut fields = stat.get(close + 2..)?.split_whitespace();
+    fields.next()?;
+    fields.next()?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn proc_env_value(pid: u32, name: &str) -> Option<String> {
+    let environ = fs::read(format!("/proc/{pid}/environ")).ok()?;
+    env_value_from_environ(&environ, name)
+}
+
+fn env_value_from_environ(environ: &[u8], name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    environ
+        .split(|byte| *byte == 0)
+        .filter_map(|part| std::str::from_utf8(part).ok())
+        .find_map(|entry| entry.strip_prefix(&prefix).map(str::to_string))
+        .filter(|value| !value.trim().is_empty())
+}
+
+async fn run_hooks_command(
+    client: &mut Client,
+    args: &[String],
+    json_output: bool,
+) -> Result<CommandOutput> {
+    let Some(first) = args.first().map(String::as_str) else {
+        bail!(
+            "Usage: limux hooks setup [agent]|uninstall [agent]|<agent> install|uninstall|<event>"
+        );
+    };
+
+    match first {
+        "setup" | "install" => {
+            let target = parse_opt(args, "--agent").or_else(|| positional_arg(args, 1));
+            let installed = install_hook_targets(target.as_deref())?;
+            return hooks_summary_output("installed", installed, json_output);
+        }
+        "uninstall" => {
+            let target = parse_opt(args, "--agent").or_else(|| positional_arg(args, 1));
+            let changed = uninstall_hook_targets(target.as_deref())?;
+            return hooks_summary_output("uninstalled", changed, json_output);
+        }
+        _ => {}
+    }
+
+    let agent = agent_hooks::AgentKind::from_hook_name(first)
+        .ok_or_else(|| anyhow!("unknown hooks target: {first}"))?;
+    let rest = &args[1..];
+    match rest.first().map(String::as_str) {
+        Some("install") => {
+            install_hook_target(agent)?;
+            hooks_summary_output(
+                "installed",
+                vec![agent.store_name().to_string()],
+                json_output,
+            )
+        }
+        Some("uninstall") => {
+            uninstall_hook_target(agent)?;
+            hooks_summary_output(
+                "uninstalled",
+                vec![agent.store_name().to_string()],
+                json_output,
+            )
+        }
+        _ => {
+            let payload = run_agent_hook(client, agent, rest).await?;
+            if json_output {
+                Ok(CommandOutput::Json(payload))
+            } else {
+                Ok(CommandOutput::Text("OK".to_string()))
+            }
+        }
+    }
+}
+
+fn hooks_summary_output(
+    action: &str,
+    agents: Vec<String>,
+    json_output: bool,
+) -> Result<CommandOutput> {
+    if json_output {
+        Ok(CommandOutput::Json(json!({
+            "action": action,
+            "agents": agents,
+        })))
+    } else {
+        Ok(CommandOutput::Text(format!(
+            "OK {action}: {}",
+            if agents.is_empty() {
+                "none".to_string()
+            } else {
+                agents.join(", ")
+            }
+        )))
+    }
+}
+
+fn install_hook_targets(target: Option<&str>) -> Result<Vec<String>> {
+    let agents = target
+        .map(|name| {
+            agent_hooks::AgentKind::from_hook_name(name)
+                .ok_or_else(|| anyhow!("unknown hooks target: {name}"))
+                .map(|agent| vec![agent])
+        })
+        .transpose()?
+        .unwrap_or_else(|| {
+            vec![
+                agent_hooks::AgentKind::Codex,
+                agent_hooks::AgentKind::Claude,
+                agent_hooks::AgentKind::OpenCode,
+            ]
+        });
+
+    let mut installed = Vec::new();
+    for agent in agents {
+        install_hook_target(agent)?;
+        installed.push(agent.store_name().to_string());
+    }
+    Ok(installed)
+}
+
+fn uninstall_hook_targets(target: Option<&str>) -> Result<Vec<String>> {
+    let agents = target
+        .map(|name| {
+            agent_hooks::AgentKind::from_hook_name(name)
+                .ok_or_else(|| anyhow!("unknown hooks target: {name}"))
+                .map(|agent| vec![agent])
+        })
+        .transpose()?
+        .unwrap_or_else(|| {
+            vec![
+                agent_hooks::AgentKind::Codex,
+                agent_hooks::AgentKind::Claude,
+                agent_hooks::AgentKind::OpenCode,
+            ]
+        });
+
+    let mut changed = Vec::new();
+    for agent in agents {
+        uninstall_hook_target(agent)?;
+        changed.push(agent.store_name().to_string());
+    }
+    Ok(changed)
+}
+
+fn install_hook_target(agent: agent_hooks::AgentKind) -> Result<()> {
+    match agent {
+        agent_hooks::AgentKind::Codex => install_json_hooks(
+            &codex_hooks_path(),
+            agent,
+            &[
+                ("SessionStart", "session-start"),
+                ("UserPromptSubmit", "prompt-submit"),
+                ("Stop", "stop"),
+            ],
+        ),
+        agent_hooks::AgentKind::Claude => install_json_hooks(
+            &claude_settings_path(),
+            agent,
+            &[
+                ("SessionStart", "session-start"),
+                ("UserPromptSubmit", "prompt-submit"),
+                ("Stop", "stop"),
+                ("Notification", "stop"),
+                ("SessionEnd", "session-end"),
+            ],
+        ),
+        agent_hooks::AgentKind::OpenCode => install_opencode_plugin(),
+        agent_hooks::AgentKind::Gemini => install_json_hooks(
+            &gemini_settings_path(),
+            agent,
+            &[
+                ("SessionStart", "session-start"),
+                ("BeforeAgent", "prompt-submit"),
+                ("AfterAgent", "stop"),
+                ("SessionEnd", "session-end"),
+            ],
+        ),
+    }
+}
+
+fn uninstall_hook_target(agent: agent_hooks::AgentKind) -> Result<()> {
+    match agent {
+        agent_hooks::AgentKind::Codex => uninstall_json_hooks(&codex_hooks_path(), agent),
+        agent_hooks::AgentKind::Claude => uninstall_json_hooks(&claude_settings_path(), agent),
+        agent_hooks::AgentKind::OpenCode => {
+            let path = opencode_plugin_path();
+            if path.exists() {
+                fs::remove_file(&path)
+                    .with_context(|| format!("failed to remove {}", path.display()))?;
+            }
+            opencode_config_unregister_plugin()
+        }
+        agent_hooks::AgentKind::Gemini => uninstall_json_hooks(&gemini_settings_path(), agent),
+    }
+}
+
+fn install_json_hooks(
+    path: &Path,
+    agent: agent_hooks::AgentKind,
+    events: &[(&str, &str)],
+) -> Result<()> {
+    let mut root = read_json_object(path)?;
+    let hooks = root
+        .entry("hooks".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let hooks = hooks
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("{} has non-object hooks field", path.display()))?;
+    let marker = hook_marker(agent);
+    for value in hooks.values_mut() {
+        if let Some(entries) = value.as_array_mut() {
+            entries.retain(|entry| !json_value_contains(entry, marker));
+        }
+    }
+    hooks.retain(|_, value| {
+        value
+            .as_array()
+            .map(|entries| !entries.is_empty())
+            .unwrap_or(true)
+    });
+
+    for (agent_event, limux_event) in events {
+        let entries = hooks
+            .entry((*agent_event).to_string())
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let entries = entries
+            .as_array_mut()
+            .ok_or_else(|| anyhow!("{} hook {agent_event} is not an array", path.display()))?;
+        entries.retain(|entry| !json_value_contains(entry, marker));
+        let mut entry = json!({
+            "hooks": [{
+                "type": "command",
+                "command": hook_command(agent, limux_event)?,
+                "statusMessage": format!("Limux {} session restore", agent.label()),
+                "timeout": hook_timeout(agent)
+            }]
+        });
+        if matches!(agent, agent_hooks::AgentKind::Claude) {
+            entry["matcher"] = Value::String("*".to_string());
+        }
+        entries.push(entry);
+    }
+
+    write_json_object(path, &root)
+}
+
+fn hook_timeout(agent: agent_hooks::AgentKind) -> u64 {
+    match agent {
+        agent_hooks::AgentKind::Claude => 5,
+        agent_hooks::AgentKind::Codex | agent_hooks::AgentKind::Gemini => 5000,
+        agent_hooks::AgentKind::OpenCode => 0,
+    }
+}
+
+fn uninstall_json_hooks(path: &Path, agent: agent_hooks::AgentKind) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_object(path)?;
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        let marker = hook_marker(agent);
+        for value in hooks.values_mut() {
+            if let Some(entries) = value.as_array_mut() {
+                entries.retain(|entry| !json_value_contains(entry, marker));
+            }
+        }
+        hooks.retain(|_, value| {
+            value
+                .as_array()
+                .map(|entries| !entries.is_empty())
+                .unwrap_or(true)
+        });
+    }
+    write_json_object(path, &root)
+}
+
+fn install_opencode_plugin() -> Result<()> {
+    let path = opencode_plugin_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(&path, opencode_plugin_source()?).context("failed to write OpenCode plugin")?;
+    opencode_config_register_plugin(&path)
+}
+
+fn opencode_config_register_plugin(plugin_path: &Path) -> Result<()> {
+    let config_path = opencode_config_path();
+    let mut root = read_json_object(&config_path)?;
+    let plugins = root
+        .entry("plugin".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let plugins = plugins
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("{} has non-array plugin field", config_path.display()))?;
+    let plugin_str = plugin_path.to_string_lossy().into_owned();
+    if !plugins.iter().any(|v| v.as_str() == Some(&plugin_str)) {
+        plugins.push(Value::String(plugin_str));
+    }
+    write_json_object(&config_path, &root)
+}
+
+fn opencode_config_unregister_plugin() -> Result<()> {
+    let config_path = opencode_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let plugin_path = opencode_plugin_path();
+    let plugin_str = plugin_path.to_string_lossy().into_owned();
+    let mut root = read_json_object(&config_path)?;
+    if let Some(plugins) = root.get_mut("plugin").and_then(Value::as_array_mut) {
+        plugins.retain(|v| v.as_str() != Some(&plugin_str));
+    }
+    write_json_object(&config_path, &root)
+}
+
+fn hook_command(agent: agent_hooks::AgentKind, event: &str) -> Result<String> {
+    let disable_var = format!(
+        "LIMUX_{}_HOOKS_DISABLED",
+        agent.store_name().to_ascii_uppercase()
+    );
+    let limux_command = hook_cli_command()?;
+    Ok(format!(
+        "[ \"${{{disable_var}:-}}\" != \"1\" ] && {limux_command} --json hooks {} {} || echo '{{\"continue\":true,\"suppressOutput\":false}}'",
+        agent.store_name(),
+        event
+    ))
+}
+
+fn hook_cli_command() -> Result<String> {
+    let exe = env::current_exe().context("failed to resolve current executable")?;
+    let file_name = exe
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if file_name == "limux-cli" {
+        return Ok(shell_single_quote(&exe.to_string_lossy()));
+    }
+    Ok("limux".to_string())
+}
+
+fn opencode_plugin_cli_command() -> Result<String> {
+    let exe = env::current_exe().context("failed to resolve current executable")?;
+    let file_name = exe
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if file_name == "limux-cli" {
+        return Ok(exe.to_string_lossy().to_string());
+    }
+    Ok("limux".to_string())
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn hook_marker(agent: agent_hooks::AgentKind) -> &'static str {
+    match agent {
+        agent_hooks::AgentKind::Claude => "hooks claude",
+        agent_hooks::AgentKind::Codex => "hooks codex",
+        agent_hooks::AgentKind::OpenCode => "hooks opencode",
+        agent_hooks::AgentKind::Gemini => "hooks gemini",
+    }
+}
+
+fn read_json_object(path: &Path) -> Result<Map<String, Value>> {
+    if !path.exists() {
+        return Ok(Map::new());
+    }
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    if raw.trim().is_empty() {
+        return Ok(Map::new());
+    }
+    let value: Value = serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| anyhow!("{} must contain a JSON object", path.display()))
+}
+
+fn write_json_object(path: &Path, object: &Map<String, Value>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let encoded = serde_json::to_vec_pretty(object).context("failed to encode hook config")?;
+    fs::write(&temp, encoded).with_context(|| format!("failed to write {}", temp.display()))?;
+    fs::rename(&temp, path).with_context(|| format!("failed to replace {}", path.display()))
+}
+
+fn json_value_contains(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(value) => value.contains(needle),
+        Value::Array(values) => values
+            .iter()
+            .any(|value| json_value_contains(value, needle)),
+        Value::Object(map) => map.values().any(|value| json_value_contains(value, needle)),
+        _ => false,
+    }
+}
+
+fn codex_hooks_path() -> PathBuf {
+    env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+        .unwrap_or_else(|| PathBuf::from(".codex"))
+        .join("hooks.json")
+}
+
+fn claude_settings_path() -> PathBuf {
+    env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude")))
+        .unwrap_or_else(|| PathBuf::from(".claude"))
+        .join("settings.json")
+}
+
+fn gemini_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".gemini/settings.json")
+}
+
+fn opencode_config_dir() -> PathBuf {
+    env::var_os("OPENCODE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config/opencode")))
+        .unwrap_or_else(|| PathBuf::from(".config/opencode"))
+}
+
+fn opencode_plugin_path() -> PathBuf {
+    opencode_config_dir().join("plugins/limux-session.js")
+}
+
+fn opencode_config_path() -> PathBuf {
+    opencode_config_dir().join("config.json")
+}
+
+fn opencode_plugin_source() -> Result<String> {
+    opencode_plugin_source_with_command(&opencode_plugin_cli_command()?)
+}
+
+fn opencode_plugin_source_with_command(limux_command: &str) -> Result<String> {
+    let limux_command_json =
+        serde_json::to_string(limux_command).context("failed to encode OpenCode hook command")?;
+    Ok(
+        r#"// limux-opencode-session-plugin v2
+// Installed by `limux hooks opencode install`. Do not edit manually.
+
+import { spawnSync } from "node:child_process";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+const LIMUX_COMMAND = __LIMUX_COMMAND__;
+
+function debug(outcome, details = {}) {
+  if (process.env.LIMUX_OPENCODE_HOOK_DEBUG !== "1" && outcome !== "spawn_failed") return;
+  try {
+    const dir = process.env.LIMUX_AGENT_HOOK_STATE_DIR || (process.env.XDG_STATE_HOME ? join(process.env.XDG_STATE_HOME, "limux") : join(process.env.HOME || ".", ".local/state/limux"));
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "opencode-plugin-debug.jsonl"), JSON.stringify({
+      time: Date.now() / 1000,
+      outcome,
+      details
+    }) + "\n");
+  } catch (_) {}
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+function props(event) {
+  return (event && typeof event === "object" && event.properties) || {};
+}
+
+function data(event) {
+  return (event && typeof event === "object" && event.data) || {};
+}
+
+function info(event) {
+  const p = props(event);
+  const d = data(event);
+  return (p.info && typeof p.info === "object" && p.info) || (d.info && typeof d.info === "object" && d.info) || {};
+}
+
+function eventType(event) {
+  const raw = firstString(event && event.type, event && event.name);
+  if (!raw) return null;
+  if (raw === "sync") return firstString(event && event.name);
+  return raw.endsWith(".1") ? raw.slice(0, -2) : raw;
+}
+
+function sessionId(event) {
+  const p = props(event);
+  const d = data(event);
+  const i = info(event);
+  return firstString(p.sessionID, p.sessionId, p.session_id, d.sessionID, d.sessionId, d.session_id, i.id, event && event.sessionID, event && event.sessionId);
+}
+
+function cwd(ctx, event) {
+  const p = props(event);
+  const d = data(event);
+  const i = info(event);
+  return firstString(p.cwd, p.directory, d.cwd, d.directory, i.directory, i.path, ctx && ctx.directory, process.cwd());
+}
+
+function launchExecutable() {
+  return firstString(process.env.LIMUX_OPENCODE_EXECUTABLE, "opencode");
+}
+
+function send(kind, ctx, event) {
+  if (process.env.LIMUX_OPENCODE_HOOKS_DISABLED === "1") {
+    debug("skip_disabled", { kind });
+    return;
+  }
+  if (!process.env.LIMUX_SURFACE_ID) {
+    debug("skip_missing_surface", { kind, type: eventType(event), hasWorkspace: !!process.env.LIMUX_WORKSPACE_ID });
+    return;
+  }
+  const sid = sessionId(event);
+  if (!sid) {
+    debug("skip_missing_session", { kind, type: eventType(event), keys: Object.keys(event || {}) });
+    return;
+  }
+  const type = eventType(event);
+  const payload = {
+    session_id: sid,
+    cwd: cwd(ctx, event),
+    hook_event_name: type,
+    event: type
+  };
+  try {
+    const command = process.env.LIMUX_BIN || LIMUX_COMMAND;
+    const result = spawnSync(command, ["hooks", "opencode", kind], {
+      input: JSON.stringify(payload),
+      encoding: "utf8",
+      stdio: ["pipe", "ignore", "ignore"],
+      timeout: 5000,
+      env: {
+        ...process.env,
+        LIMUX_AGENT_LAUNCH_ARGV: launchExecutable(),
+        LIMUX_AGENT_LAUNCH_EXECUTABLE: launchExecutable(),
+        LIMUX_AGENT_LAUNCH_CWD: cwd(ctx, event)
+      }
+    });
+    debug("spawned", { kind, type, status: result.status, error: result.error && String(result.error), command });
+  } catch (error) {
+    debug("spawn_failed", { kind, type, error: String(error) });
+  }
+}
+
+const limuxSessionRestore = async (ctx) => {
+  debug("plugin_started", { directory: ctx && ctx.directory, hasSurface: !!process.env.LIMUX_SURFACE_ID, hasWorkspace: !!process.env.LIMUX_WORKSPACE_ID });
+  return {
+    event: async ({ event }) => {
+    const type = eventType(event);
+    debug("event", { type, rawType: event && event.type, rawName: event && event.name });
+    if (!type) return;
+    if (type === "session.created") send("session-start", ctx, event);
+    if (type === "session.idle" || type === "session.updated" || type === "session.status" || type === "session.compacted") send("prompt-submit", ctx, event);
+    if (type === "session.error") send("session-end", ctx, event);
+    if (type === "session.deleted") send("cleanup", ctx, event);
+    }
+  };
+};
+
+export const LimuxSessionRestore = limuxSessionRestore;
+export default limuxSessionRestore;
+"#
+        .replace("__LIMUX_COMMAND__", &limux_command_json),
+    )
 }
 
 async fn run_new_workspace(client: &mut Client, args: &[String]) -> Result<Value> {
@@ -2446,9 +3366,9 @@ async fn execute_command(client: &mut Client, opts: &GlobalOptions) -> Result<Co
         }
         "claude-hook" | "opencode-hook" | "gemini-hook" => {
             let agent = match command {
-                "claude-hook" => AgentKind::Claude,
-                "opencode-hook" => AgentKind::OpenCode,
-                "gemini-hook" => AgentKind::Gemini,
+                "claude-hook" => agent_hooks::AgentKind::Claude,
+                "opencode-hook" => agent_hooks::AgentKind::OpenCode,
+                "gemini-hook" => agent_hooks::AgentKind::Gemini,
                 _ => unreachable!(),
             };
             let payload = run_agent_hook(client, agent, args).await?;
@@ -2458,6 +3378,7 @@ async fn execute_command(client: &mut Client, opts: &GlobalOptions) -> Result<Co
                 CommandOutput::Text("OK".to_string())
             }
         }
+        "hooks" => return run_hooks_command(client, args, opts.json_output).await,
         "new-workspace" => {
             let payload = run_new_workspace(client, args).await?;
             if opts.json_output {
@@ -2699,6 +3620,178 @@ mod cli_arg_tests {
         let payload = json!({ "hook_event_name": "Notification" });
 
         assert_eq!(parse_hook_event(&args, &payload), "Stop");
+    }
+
+    #[test]
+    fn external_session_end_preserves_restorable_hook_session() {
+        assert_eq!(
+            agent_hook_persistence_action("SessionEnd"),
+            AgentHookPersistenceAction::Preserve
+        );
+        assert_eq!(
+            agent_hook_persistence_action("session-end"),
+            AgentHookPersistenceAction::Preserve
+        );
+    }
+
+    #[test]
+    fn internal_cleanup_removes_restorable_hook_session() {
+        assert_eq!(
+            agent_hook_persistence_action("cleanup"),
+            AgentHookPersistenceAction::Remove
+        );
+        assert_eq!(
+            agent_hook_persistence_action("restore-exit"),
+            AgentHookPersistenceAction::Remove
+        );
+    }
+
+    #[test]
+    fn opencode_plugin_embeds_installer_cli_command() {
+        let source = opencode_plugin_source_with_command("/tmp/limux-cli").expect("plugin source");
+
+        assert!(source.contains("const LIMUX_COMMAND = \"/tmp/limux-cli\";"));
+        assert!(source.contains("process.env.LIMUX_BIN || LIMUX_COMMAND"));
+        assert!(!source.contains("process.env.LIMUX_BIN || \"limux\""));
+    }
+
+    #[test]
+    fn opencode_plugin_removes_only_deleted_sessions() {
+        let source = opencode_plugin_source_with_command("/tmp/limux-cli").expect("plugin source");
+
+        assert!(
+            source.contains("if (type === \"session.error\") send(\"session-end\", ctx, event);")
+        );
+        assert!(source.contains("if (type === \"session.deleted\") send(\"cleanup\", ctx, event);"));
+        assert!(source.contains("type === \"session.status\""));
+        assert!(source.contains("type === \"session.compacted\""));
+    }
+
+    #[test]
+    fn stop_hook_output_matches_codex_schema_shape() {
+        let output = agent_hook_output("stop", &json!({ "session_id": "session-a" }));
+
+        assert_eq!(
+            output,
+            json!({
+                "continue": true,
+                "suppressOutput": false
+            })
+        );
+    }
+
+    #[test]
+    fn session_start_hook_output_uses_camel_case_specific_output() {
+        let output = agent_hook_output(
+            "session-start",
+            &json!({ "additionalContext": "Limux session restore tracking active." }),
+        );
+
+        assert_eq!(
+            output,
+            json!({
+                "continue": true,
+                "suppressOutput": false,
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": "Limux session restore tracking active."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn claude_hook_install_writes_required_matcher() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+
+        install_json_hooks(
+            &path,
+            agent_hooks::AgentKind::Claude,
+            &[("SessionStart", "session-start")],
+        )
+        .expect("install hooks");
+
+        let root: Value =
+            serde_json::from_slice(&fs::read(&path).expect("read settings")).expect("json");
+        let entry = &root["hooks"]["SessionStart"][0];
+        assert_eq!(entry["matcher"], "*");
+        assert_eq!(entry["hooks"][0]["timeout"], 5);
+        assert!(entry["hooks"][0]["command"]
+            .as_str()
+            .expect("command")
+            .contains("hooks claude session-start"));
+    }
+
+    #[test]
+    fn codex_hook_install_keeps_codex_schema_without_matcher() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("hooks.json");
+
+        install_json_hooks(
+            &path,
+            agent_hooks::AgentKind::Codex,
+            &[("SessionStart", "session-start")],
+        )
+        .expect("install hooks");
+
+        let root: Value =
+            serde_json::from_slice(&fs::read(&path).expect("read hooks")).expect("json");
+        let entry = &root["hooks"]["SessionStart"][0];
+        assert!(entry.get("matcher").is_none());
+        assert_eq!(entry["hooks"][0]["timeout"], 5000);
+        assert!(entry["hooks"][0]["command"]
+            .as_str()
+            .expect("command")
+            .contains("hooks codex session-start"));
+    }
+
+    #[test]
+    fn environ_parser_reads_requested_limux_value() {
+        let environ = b"PATH=/bin\0LIMUX_WORKSPACE_ID=ws-1\0LIMUX_SURFACE_ID=7:tab-a\0";
+
+        assert_eq!(
+            env_value_from_environ(environ, "LIMUX_WORKSPACE_ID").as_deref(),
+            Some("ws-1")
+        );
+        assert_eq!(
+            env_value_from_environ(environ, "LIMUX_SURFACE_ID").as_deref(),
+            Some("7:tab-a")
+        );
+        assert_eq!(env_value_from_environ(environ, "LIMUX_PANE_ID"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat_parser_handles_process_names_with_spaces() {
+        let stat = "1234 (claude hook sh) S 987 1 1 0 -1 4194560";
+
+        assert_eq!(parse_proc_stat_parent_pid(stat), Some(987));
+    }
+
+    #[test]
+    fn hook_session_id_falls_back_to_transcript_stem() {
+        let payload = json!({
+            "transcript_path": "/home/amwill/.claude/projects/-home-amwill-Applications-limux/268746f1-5a8f-471c-85db-dc50649c2f9c.jsonl"
+        });
+
+        assert_eq!(
+            hook_session_id(&payload).as_deref(),
+            Some("268746f1-5a8f-471c-85db-dc50649c2f9c")
+        );
+    }
+
+    #[test]
+    fn hook_session_id_prefers_explicit_session_id() {
+        let payload = json!({
+            "session_id": "explicit-session",
+            "transcript_path": "/tmp/transcript-session.jsonl"
+        });
+
+        assert_eq!(
+            hook_session_id(&payload).as_deref(),
+            Some("explicit-session")
+        );
     }
 }
 

@@ -739,13 +739,21 @@ fn suspend_persistence(state: &State, suspended: bool) {
     state.borrow_mut().persistence_suspended = suspended;
 }
 
-fn apply_loaded_session(state: &State, loaded: LoadedSession) {
+fn apply_loaded_session(state: &State, mut loaded: LoadedSession) {
     suspend_persistence(state, true);
 
     apply_top_bar_state_immediately(state, loaded.state.top_bar_visible);
 
     let restored_any = !loaded.state.workspaces.is_empty();
     if restored_any {
+        let restorable_agents = layout_state::RestorableAgentIndex::load();
+        for workspace in &mut loaded.state.workspaces {
+            layout_state::attach_restorable_agents_to_layout(
+                &mut workspace.layout,
+                workspace.id.as_deref().unwrap_or(""),
+                &restorable_agents,
+            );
+        }
         for workspace in &loaded.state.workspaces {
             add_workspace_from_state(state, workspace);
         }
@@ -810,6 +818,7 @@ fn apply_top_bar_state_immediately(state: &State, visible: bool) {
 
 fn snapshot_session_state(state: &State) -> AppSessionState {
     let s = state.borrow();
+    let restorable_agents = layout_state::RestorableAgentIndex::load();
     let sidebar_visible = sidebar_is_visible(&s);
     let sidebar_width = if sidebar_visible {
         s.paned.position()
@@ -825,15 +834,22 @@ fn snapshot_session_state(state: &State) -> AppSessionState {
             let cwd = workspace.cwd.borrow().clone();
             let folder_path = workspace.folder_path.clone();
             let working_directory = folder_path.clone().or(cwd.clone());
+            let mut layout = workspace
+                .split_container
+                .tree()
+                .snapshot(working_directory.as_deref());
+            layout_state::attach_restorable_agents_to_layout(
+                &mut layout,
+                &workspace.id,
+                &restorable_agents,
+            );
             WorkspaceState {
+                id: Some(workspace.id.clone()),
                 name: workspace.name.clone(),
                 favorite: workspace.favorite,
                 cwd,
                 folder_path,
-                layout: workspace
-                    .split_container
-                    .tree()
-                    .snapshot(working_directory.as_deref()),
+                layout,
             }
         })
         .collect();
@@ -3271,6 +3287,7 @@ fn show_legacy_workspace_folder_dialog(state: &State, window: Option<&gtk::Windo
 
 fn create_workspace_with_folder(state: &State, name: &str, folder_path: &str) {
     let workspace = WorkspaceState {
+        id: None,
         name: name.to_string(),
         favorite: false,
         cwd: Some(folder_path.to_string()),
@@ -3808,7 +3825,12 @@ fn add_workspace_from_state(state: &State, workspace: &WorkspaceState) {
         let s = state.borrow();
         (s.stack.clone(), s.sidebar_list.clone())
     };
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = workspace
+        .id
+        .as_deref()
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let stack_name = format!("ws-{id}");
     let working_dir = workspace
         .folder_path
