@@ -91,6 +91,8 @@ const BROWSER_URL_ENTRY_CSS_CLASSES: [&str; 2] =
 const BROWSER_SEARCH_ENTRY_CSS_CLASS: &str = "limux-browser-search-entry";
 const BROWSER_SEARCH_ENTRY_CSS_CLASSES: [&str; 2] =
     [HOST_ENTRY_CSS_CLASS, BROWSER_SEARCH_ENTRY_CSS_CLASS];
+#[cfg(feature = "webkit")]
+const BROWSER_WEB_VIEW_CSS_CLASS: &str = "limux-browser-web-view";
 
 pub fn is_tab_dragging() -> bool {
     TAB_DRAGGING.with(|value| value.get())
@@ -365,6 +367,11 @@ pub const PANE_CSS: &str = r#"
 .limux-browser-search-entry {
     min-height: 0;
     font-size: 12px;
+}
+.limux-browser,
+.limux-browser-web-view {
+    min-width: 0;
+    min-height: 0;
 }
 .limux-tab-drop-indicator {
     background-color: @accent_bg_color;
@@ -2967,6 +2974,67 @@ impl BrowserHandles {
 const LIMUX_BROWSER_EDITABLE_STATE_HANDLER: &str = "limuxEditableState";
 
 #[cfg(feature = "webkit")]
+fn env_value_contains_token(value: &str, token: &str) -> bool {
+    value
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|part| part.eq_ignore_ascii_case(token))
+}
+
+#[cfg(feature = "webkit")]
+fn is_kde_wayland_session_from_env<'a>(
+    values: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> bool {
+    let mut is_wayland = false;
+    let mut is_kde = false;
+
+    for (key, value) in values {
+        match key {
+            "WAYLAND_DISPLAY" if !value.trim().is_empty() => is_wayland = true,
+            "XDG_SESSION_TYPE" if value.eq_ignore_ascii_case("wayland") => is_wayland = true,
+            "XDG_CURRENT_DESKTOP" | "XDG_SESSION_DESKTOP" | "DESKTOP_SESSION" => {
+                is_kde |= env_value_contains_token(value, "kde")
+                    || env_value_contains_token(value, "plasma");
+            }
+            "KDE_FULL_SESSION" if value.eq_ignore_ascii_case("true") || value == "1" => {
+                is_kde = true;
+            }
+            _ => {}
+        }
+    }
+
+    is_wayland && is_kde
+}
+
+#[cfg(feature = "webkit")]
+fn is_kde_wayland_session() -> bool {
+    let keys = [
+        "WAYLAND_DISPLAY",
+        "XDG_SESSION_TYPE",
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+        "KDE_FULL_SESSION",
+    ];
+    let values = keys
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+        .collect::<Vec<_>>();
+
+    is_kde_wayland_session_from_env(values.iter().map(|(key, value)| (*key, value.as_str())))
+}
+
+#[cfg(feature = "webkit")]
+fn configure_browser_settings(settings: &webkit6::Settings) {
+    settings.set_enable_developer_extras(true);
+    settings.set_javascript_can_open_windows_automatically(true);
+
+    if is_kde_wayland_session() {
+        settings.set_hardware_acceleration_policy(webkit6::HardwareAccelerationPolicy::Never);
+        settings.set_enable_2d_canvas_acceleration(false);
+    }
+}
+
+#[cfg(feature = "webkit")]
 const LIMUX_BROWSER_EDITABLE_STATE_SCRIPT: &str = r#"
 (() => {
   const handler = globalThis.webkit?.messageHandlers?.limuxEditableState;
@@ -3062,11 +3130,13 @@ fn create_browser_widget(
         .hexpand(true)
         .vexpand(true)
         .build();
+    webview.add_css_class(BROWSER_WEB_VIEW_CSS_CLASS);
+    webview.set_halign(gtk::Align::Fill);
+    webview.set_valign(gtk::Align::Fill);
+    webview.set_overflow(gtk::Overflow::Hidden);
 
-    // Set permissive settings
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
-        settings.set_enable_developer_extras(true);
-        settings.set_javascript_can_open_windows_automatically(true);
+        configure_browser_settings(&settings);
     }
 
     let url_entry = gtk::Entry::builder()
@@ -3170,6 +3240,9 @@ fn create_browser_widget(
     vbox.append(&webview.clone());
     vbox.set_hexpand(true);
     vbox.set_vexpand(true);
+    vbox.set_halign(gtk::Align::Fill);
+    vbox.set_valign(gtk::Align::Fill);
+    vbox.set_overflow(gtk::Overflow::Hidden);
     vbox.add_css_class("limux-browser");
 
     let browser_handles = BrowserHandles {
@@ -3283,6 +3356,10 @@ mod tests {
         BROWSER_URL_ENTRY_CSS_CLASS, BROWSER_URL_ENTRY_CSS_CLASSES, HOST_ENTRY_CSS_CLASS, PANE_CSS,
         TAB_RENAME_ENTRY_CSS_CLASS, TAB_RENAME_ENTRY_CSS_CLASSES,
     };
+    #[cfg(feature = "webkit")]
+    use super::{
+        env_value_contains_token, is_kde_wayland_session_from_env, BROWSER_WEB_VIEW_CSS_CLASS,
+    };
     use crate::shortcut_config::{default_shortcuts, resolve_shortcuts_from_str, ShortcutId};
 
     #[test]
@@ -3329,6 +3406,8 @@ mod tests {
         assert!(PANE_CSS.contains(".limux-tab-rename-entry"));
         assert!(PANE_CSS.contains(".limux-browser-url-entry"));
         assert!(PANE_CSS.contains(".limux-browser-search-entry"));
+        #[cfg(feature = "webkit")]
+        assert!(PANE_CSS.contains(BROWSER_WEB_VIEW_CSS_CLASS));
         assert!(!PANE_CSS.contains("border: 1px solid rgba(0, 145, 255, 0.5);"));
     }
 
@@ -3346,6 +3425,37 @@ mod tests {
             BROWSER_SEARCH_ENTRY_CSS_CLASSES,
             [HOST_ENTRY_CSS_CLASS, BROWSER_SEARCH_ENTRY_CSS_CLASS]
         );
+    }
+
+    #[cfg(feature = "webkit")]
+    #[test]
+    fn browser_environment_token_matching_requires_real_tokens() {
+        assert!(env_value_contains_token("KDE", "kde"));
+        assert!(env_value_contains_token("GNOME:KDE", "kde"));
+        assert!(env_value_contains_token("plasma-wayland", "plasma"));
+        assert!(!env_value_contains_token("notkde", "kde"));
+        assert!(!env_value_contains_token("kdevelopment", "kde"));
+    }
+
+    #[cfg(feature = "webkit")]
+    #[test]
+    fn kde_wayland_detection_matches_reported_browser_corruption_environment() {
+        assert!(is_kde_wayland_session_from_env([
+            ("XDG_CURRENT_DESKTOP", "KDE"),
+            ("XDG_SESSION_TYPE", "wayland"),
+        ]));
+        assert!(is_kde_wayland_session_from_env([
+            ("DESKTOP_SESSION", "plasma"),
+            ("WAYLAND_DISPLAY", "wayland-0"),
+        ]));
+        assert!(!is_kde_wayland_session_from_env([
+            ("XDG_CURRENT_DESKTOP", "KDE"),
+            ("XDG_SESSION_TYPE", "x11"),
+        ]));
+        assert!(!is_kde_wayland_session_from_env([
+            ("XDG_CURRENT_DESKTOP", "GNOME"),
+            ("WAYLAND_DISPLAY", "wayland-0"),
+        ]));
     }
 
     #[test]
