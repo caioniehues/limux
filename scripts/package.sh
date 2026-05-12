@@ -64,7 +64,7 @@ assert_glibc_compatibility() {
     local label="$2"
     local required_glibc
 
-    required_glibc="$(glibc_requirement_for "$path")"
+    required_glibc="$(glibc_requirement_for "$path" || true)"
     if [ -z "$required_glibc" ]; then
         echo "WARNING: unable to determine GLIBC requirement for ${label}"
         return 0
