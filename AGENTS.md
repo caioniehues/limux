@@ -35,8 +35,9 @@ outside the GUI.
 2. **`target/debug/limux-cli`** — the actual CLI from `limux-cli`. This
    is what `agent-team`, `notify`, `claude-hook`, etc. live on.
 
-Installed users get `limux` as a symlink to the CLI binary, but when you
-build locally, use `./target/debug/limux-cli …` explicitly.
+Installed users get `limux` as the CLI binary and `limux-host` as the
+private GTK host under `libexec`; running `limux` with no arguments opens the
+app. When you build locally, use `./target/debug/limux-cli …` explicitly.
 
 ```bash
 cargo build -p limux-cli --bin limux-cli

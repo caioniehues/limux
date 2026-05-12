@@ -756,11 +756,29 @@ fn limux_cli_executable() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|path| {
-            let candidate = path.with_file_name("limux-cli");
-            candidate.exists().then_some(candidate)
+            limux_cli_candidates(&path)
+                .into_iter()
+                .find(|candidate| candidate.exists())
         })
         .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| "limux-cli".to_string())
+        .unwrap_or_else(|| "limux".to_string())
+}
+
+fn limux_cli_candidates(exe: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(dir) = exe.parent() {
+        candidates.push(dir.join("limux-cli"));
+
+        if let Some(libexec_dir) = dir.parent() {
+            if let Some(prefix) = libexec_dir.parent() {
+                candidates.push(prefix.join("bin/limux"));
+            }
+        }
+    }
+
+    candidates.push(PathBuf::from("limux"));
+    candidates
 }
 
 fn sanitize_launch_arguments(kind: RestorableAgentKind, arguments: &[String]) -> Vec<String> {
@@ -933,6 +951,19 @@ mod tests {
             PathBuf::from("/tmp/limux-home/.local/share").join(PERSISTENCE_DIR_NAME)
         );
     }
+
+    #[test]
+    fn limux_cli_candidates_cover_installed_and_dev_layouts() {
+        let installed = Path::new("/usr/libexec/limux/limux-host");
+        let candidates = limux_cli_candidates(installed);
+        assert!(candidates.contains(&PathBuf::from("/usr/bin/limux")));
+
+        let dev = Path::new("/repo/target/debug/limux");
+        let candidates = limux_cli_candidates(dev);
+        assert!(candidates.contains(&PathBuf::from("/repo/target/debug/limux-cli")));
+        assert!(candidates.contains(&PathBuf::from("limux")));
+    }
+
     #[test]
     fn load_prefers_canonical_session_over_legacy() {
         let dir = tempdir().expect("tempdir");

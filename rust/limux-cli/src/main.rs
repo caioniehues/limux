@@ -199,8 +199,73 @@ fn parse_global_args() -> Result<GlobalOptions> {
 
 fn print_help() {
     println!(
-        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--pane <id|ref>] [--surface <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--command <text>] [--url <url>]\n      Live GTK self-spawn currently supports terminal panes only; browser panes remain deferred.\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  hooks setup [agent] | hooks uninstall [agent] | hooks <agent> <event>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Splits the active workspace into one pane per agent (caller's pane stays\n      as the orchestrator on the left, peers stack down the right), launches\n      each CLI in its pane, and writes AGENTS.md describing the <agent-msg>\n      XML protocol so peers can talk via\n      `limux send --surface <peer-surface-id> <envelope>`.\n"
+        "limux CLI\n\nUsage: limux [--socket <path>] [--json] [--id-format refs|both|uuids] <command> [args...]\n       limux\n\nRunning `limux` with no arguments launches the GTK app.\n\nCommon commands:\n  identify [--workspace <id|ref>] [--surface <id|ref>]\n  list-panels [--workspace <id|ref>]\n  list-panes [--workspace <id|ref>]\n  list-workspaces\n  surface-health [--workspace <id|ref>]\n  send [--workspace <id|ref>] [--surface <id|ref>] <text>\n  send-key [--workspace <id|ref>] [--surface <id|ref>] <key>\n  new-workspace [--cwd <path>] [--command <text>]\n  close-workspace --workspace <id|ref>\n  sidebar-state --workspace <id|ref>\n  new-surface [--workspace <id|ref>]\n  new-pane [--workspace <id|ref>] [--pane <id|ref>] [--surface <id|ref>] [--direction <left|right|up|down>] [--type <terminal|browser>] [--command <text>] [--url <url>]\n      Live GTK self-spawn currently supports terminal panes only; browser panes remain deferred.\n  rename-workspace [--workspace <id|ref>] <title>\n  rename-window [--workspace <id|ref>] <title>\n  rename-tab [--workspace <id|ref>] [--tab <id|ref>] <title>\n  read-screen [--workspace <id|ref>] [--surface <id|ref>] [--scrollback] [--lines <n>]\n  capture-pane (alias of read-screen)\n  tab-action --action <name> [--workspace <id|ref>] [--tab <id|ref>] [--title <text>] [--url <url>]\n  browser [--surface <id|ref>|<surface>] <subcommand> ...\n\nAgent integrations:\n  notify [--workspace <id|ref>] [--subtitle <text>] [--body <text>] <title>\n  hooks setup [agent] | hooks uninstall [agent] | hooks <agent> <event>\n  claude-hook | opencode-hook | gemini-hook --event <name> [--subtitle <text>] [--body <text>] [--title <text>]\n  agent-team [--agents codex,claude[,opencode,gemini]] [--cwd <path>] [--no-launch] [--dry-run]\n      Splits the active workspace into one pane per agent (caller's pane stays\n      as the orchestrator on the left, peers stack down the right), launches\n      each CLI in its pane, and writes AGENTS.md describing the <agent-msg>\n      XML protocol so peers can talk via\n      `limux send --surface <peer-surface-id> <envelope>`.\n"
     );
+}
+
+fn should_launch_host(opts: &GlobalOptions) -> bool {
+    opts.command_args.is_empty()
+        && opts.request.is_none()
+        && opts.socket.is_none()
+        && opts.socket_mode == SocketMode::Runtime
+        && !opts.json_output
+        && !opts.pretty
+        && opts.id_format == IdFormat::Refs
+}
+
+fn host_binary_candidates(exe: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(bin_dir) = exe.parent() {
+        if let Some(prefix) = bin_dir.parent() {
+            candidates.push(prefix.join("libexec/limux/limux-host"));
+        }
+
+        let sibling_host = bin_dir.join("limux-host");
+        if sibling_host != exe {
+            candidates.push(sibling_host);
+        }
+
+        let sibling_dev_host = bin_dir.join("limux");
+        if sibling_dev_host != exe {
+            candidates.push(sibling_dev_host);
+        }
+    }
+
+    candidates
+}
+
+fn resolve_host_binary() -> Result<PathBuf> {
+    if let Ok(raw) = env::var("LIMUX_HOST_BIN") {
+        let path = PathBuf::from(raw);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+
+    let exe = env::current_exe().context("failed to resolve current executable")?;
+    host_binary_candidates(&exe)
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            anyhow!(
+                "could not find limux host binary; expected limux-host next to the installed CLI"
+            )
+        })
+}
+
+fn launch_host() -> Result<()> {
+    let host = resolve_host_binary()?;
+    let err = Command::new(&host)
+        .spawn()
+        .with_context(|| format!("failed to launch {}", host.display()))?
+        .wait()
+        .with_context(|| format!("failed to wait for {}", host.display()))?;
+    if err.success() {
+        Ok(())
+    } else {
+        bail!("{} exited with {}", host.display(), err)
+    }
 }
 
 fn get_string(value: &Value, keys: &[&str]) -> Option<String> {
@@ -3541,6 +3606,10 @@ async fn execute_command(client: &mut Client, opts: &GlobalOptions) -> Result<Co
 #[tokio::main]
 async fn main() -> Result<()> {
     let opts = parse_global_args()?;
+    if should_launch_host(&opts) {
+        return launch_host();
+    }
+
     let socket = resolve_socket_path(opts.socket.clone(), opts.socket_mode);
 
     let mut client = Client::new(socket);
@@ -3579,6 +3648,43 @@ mod cli_arg_tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn default_opts(command_args: Vec<String>) -> GlobalOptions {
+        GlobalOptions {
+            socket: None,
+            socket_mode: SocketMode::Runtime,
+            json_output: false,
+            id_format: IdFormat::Refs,
+            request: None,
+            pretty: false,
+            command_args,
+        }
+    }
+
+    #[test]
+    fn no_args_launches_host_but_cli_flags_do_not() {
+        assert!(should_launch_host(&default_opts(Vec::new())));
+
+        let mut json_only = default_opts(Vec::new());
+        json_only.json_output = true;
+        assert!(!should_launch_host(&json_only));
+
+        assert!(!should_launch_host(&default_opts(args(&[
+            "list-workspaces"
+        ]))));
+    }
+
+    #[test]
+    fn host_binary_candidates_cover_installed_and_dev_layouts() {
+        let installed = Path::new("/usr/bin/limux");
+        let candidates = host_binary_candidates(installed);
+        assert!(candidates.contains(&PathBuf::from("/usr/libexec/limux/limux-host")));
+        assert!(!candidates.contains(&PathBuf::from("/usr/bin/limux")));
+
+        let dev = Path::new("/repo/target/debug/limux-cli");
+        let candidates = host_binary_candidates(dev);
+        assert!(candidates.contains(&PathBuf::from("/repo/target/debug/limux")));
     }
 
     #[test]

@@ -42,6 +42,7 @@ appstreamcli refresh-cache --force 2>/dev/null || true
 
 %files
 %{_bindir}/limux
+%{_libexecdir}/limux/limux-host
 /usr/lib/limux/libghostty.so
 %{_datadir}/limux/
 %{_datadir}/applications/dev.limux.linux.desktop

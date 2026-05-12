@@ -49,7 +49,8 @@ terminal session inside a limux workspace.
   what implements `agent-team`, `notify`, `claude-hook`, etc.
 
 Always test CLI subcommands with `./target/debug/limux-cli …`, not
-plain `limux`. Installed users get `limux` as a symlink to the CLI.
+plain `limux`. Installed users get `limux` as the CLI, and that CLI opens
+the GTK app when run with no arguments.
 
 ## Build & test cheat sheet
 

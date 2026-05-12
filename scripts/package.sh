@@ -26,6 +26,8 @@ DESKTOP_FILE="${ROOT_DIR}/rust/limux-host-linux/dev.limux.linux.desktop"
 METADATA_FILE="${ROOT_DIR}/rust/limux-host-linux/dev.limux.linux.metainfo.xml"
 OUT_DIR="${ROOT_DIR}/dist"
 GHOSTTY_ZIG_ARGS=(-Doptimize=ReleaseFast -Dcpu=baseline)
+CLI_ENTRYPOINT_NAME="limux"
+HOST_ENTRYPOINT_NAME="limux-host"
 
 remove_tree() {
     local path="$1"
@@ -78,6 +80,16 @@ assert_glibc_compatibility() {
     fi
 
     echo "Verified ${label} GLIBC requirement: GLIBC_${required_glibc} (target max GLIBC_${MAX_GLIBC_VERSION})"
+}
+
+assert_cli_entrypoint() {
+    local path="$1"
+    local label="$2"
+
+    if ! "$path" --help 2>&1 | grep -q "limux CLI"; then
+        echo "ERROR: ${label} is not the limux CLI entrypoint: ${path}"
+        exit 1
+    fi
 }
 
 resolve_ghostty_share_dir() {
@@ -230,14 +242,21 @@ fi
 echo "Building release binary..."
 cargo build --release --manifest-path "${ROOT_DIR}/Cargo.toml"
 
-BINARY="${ROOT_DIR}/target/release/limux"
-if [ ! -f "$BINARY" ]; then
-    echo "ERROR: Binary not found at ${BINARY}"
+CLI_BINARY="${ROOT_DIR}/target/release/limux-cli"
+HOST_BINARY="${ROOT_DIR}/target/release/limux"
+if [ ! -f "$CLI_BINARY" ]; then
+    echo "ERROR: CLI binary not found at ${CLI_BINARY}"
+    exit 1
+fi
+if [ ! -f "$HOST_BINARY" ]; then
+    echo "ERROR: Host binary not found at ${HOST_BINARY}"
     exit 1
 fi
 
 assert_glibc_compatibility "$GHOSTTY_SO" "libghostty.so"
-assert_glibc_compatibility "$BINARY" "limux"
+assert_glibc_compatibility "$CLI_BINARY" "limux CLI"
+assert_glibc_compatibility "$HOST_BINARY" "limux host"
+assert_cli_entrypoint "$CLI_BINARY" "target/release/limux-cli"
 
 # Clean staging and output
 remove_tree "$STAGE"
@@ -252,6 +271,7 @@ populate_tree() {
     local prefix="${2:-/usr/local}"
     local strip_files="${3:-true}"
     local bindir="$dest${prefix}/bin"
+    local libexecdir="$dest${prefix}/libexec/limux"
     local libdir="$dest${prefix}/lib/limux"
     local ghostty_datadir="$dest${prefix}/share/limux"
     local ghostty_resdir="$ghostty_datadir/ghostty"
@@ -259,14 +279,17 @@ populate_tree() {
     local metadatadir="$dest${prefix}/share/metainfo"
     local icondir="$dest${prefix}/share/icons/hicolor"
 
-    mkdir -p "$bindir" "$libdir" "$ghostty_resdir" "$appdir" "$metadatadir" "$icondir/scalable/actions"
+    mkdir -p "$bindir" "$libexecdir" "$libdir" "$ghostty_resdir" "$appdir" "$metadatadir" "$icondir/scalable/actions"
 
-    # Binary
-    cp "$BINARY" "$bindir/limux"
+    # Public CLI and private GTK host binary.
+    cp "$CLI_BINARY" "$bindir/$CLI_ENTRYPOINT_NAME"
+    cp "$HOST_BINARY" "$libexecdir/$HOST_ENTRYPOINT_NAME"
     if [ "$strip_files" = "true" ]; then
-        strip "$bindir/limux"
+        strip "$bindir/$CLI_ENTRYPOINT_NAME"
+        strip "$libexecdir/$HOST_ENTRYPOINT_NAME"
     fi
-    chmod 755 "$bindir/limux"
+    chmod 755 "$bindir/$CLI_ENTRYPOINT_NAME" "$libexecdir/$HOST_ENTRYPOINT_NAME"
+    assert_cli_entrypoint "$bindir/$CLI_ENTRYPOINT_NAME" "packaged $prefix/bin/$CLI_ENTRYPOINT_NAME"
 
     # Shared library
     cp "$GHOSTTY_SO" "$libdir/libghostty.so"
@@ -356,12 +379,15 @@ echo ""
 echo "--- Building tarball ---"
 TARBALL_STAGE="/tmp/${PKG_BASE}"
 remove_tree "$TARBALL_STAGE"
-mkdir -p "$TARBALL_STAGE"/{lib,share/limux/ghostty,share/limux/terminfo,share/applications,share/icons/hicolor/scalable/actions}
+mkdir -p "$TARBALL_STAGE"/{lib,libexec/limux,share/limux/ghostty,share/limux/terminfo,share/applications,share/icons/hicolor/scalable/actions}
 mkdir -p "$TARBALL_STAGE/share/metainfo"
 
-cp "$BINARY" "$TARBALL_STAGE/limux"
+cp "$CLI_BINARY" "$TARBALL_STAGE/limux"
+cp "$HOST_BINARY" "$TARBALL_STAGE/libexec/limux/limux-host"
 strip "$TARBALL_STAGE/limux"
-chmod 755 "$TARBALL_STAGE/limux"
+strip "$TARBALL_STAGE/libexec/limux/limux-host"
+chmod 755 "$TARBALL_STAGE/limux" "$TARBALL_STAGE/libexec/limux/limux-host"
+assert_cli_entrypoint "$TARBALL_STAGE/limux" "tarball limux"
 cp "$GHOSTTY_SO" "$TARBALL_STAGE/lib/libghostty.so"
 strip --strip-debug "$TARBALL_STAGE/lib/libghostty.so"
 cp -r "$GHOSTTY_SHARE_DIR"/. "$TARBALL_STAGE/share/limux/ghostty"
@@ -429,6 +455,7 @@ if $UNINSTALL; then
     need_root "$@"
     echo "Uninstalling Limux..."
     rm -f "$PREFIX/bin/limux"
+    remove_tree "$PREFIX/libexec/limux"
     remove_tree "$PREFIX/lib/limux"
     remove_tree "$PREFIX/share/limux"
     rm -f /etc/ld.so.conf.d/limux.conf
@@ -453,6 +480,7 @@ need_root "$@"
 echo "Installing Limux to ${PREFIX}..."
 
 install -Dm755 "$SCRIPT_DIR/limux" "$PREFIX/bin/limux"
+install -Dm755 "$SCRIPT_DIR/libexec/limux/limux-host" "$PREFIX/libexec/limux/limux-host"
 install -Dm644 "$SCRIPT_DIR/lib/libghostty.so" "$PREFIX/lib/limux/libghostty.so"
 if [ -d "$SCRIPT_DIR/share/limux" ]; then
     cp -r "$SCRIPT_DIR/share/limux" "$PREFIX/share/"
@@ -471,9 +499,10 @@ appstreamcli refresh-cache --force 2>/dev/null || true
 
 echo ""
 echo "Limux installed successfully!"
-echo "  Binary:  $PREFIX/bin/limux"
+echo "  CLI:     $PREFIX/bin/limux"
+echo "  Host:    $PREFIX/libexec/limux/limux-host"
 echo "  Library: $PREFIX/lib/limux/libghostty.so"
-echo "  Run:     limux"
+echo "  App:     limux"
 echo ""
 echo "System dependencies (install if missing):"
 echo "  sudo apt install libgtk-4-1 libadwaita-1-0 libwebkitgtk-6.0-4"
@@ -556,15 +585,19 @@ echo ""
 echo "--- Building AppImage ---"
 APPDIR="$STAGE/Limux.AppDir"
 remove_tree "$APPDIR"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/applications" \
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/libexec/limux" \
+         "$APPDIR/usr/share/applications" \
          "$APPDIR/usr/share/metainfo" \
          "$APPDIR/usr/share/icons/hicolor/scalable/actions" \
          "$APPDIR/usr/share/limux"
 
-# Binary
-cp "$BINARY" "$APPDIR/usr/bin/limux"
+# Public CLI and private GTK host binary.
+cp "$CLI_BINARY" "$APPDIR/usr/bin/limux"
+cp "$HOST_BINARY" "$APPDIR/usr/libexec/limux/limux-host"
 strip "$APPDIR/usr/bin/limux"
-chmod 755 "$APPDIR/usr/bin/limux"
+strip "$APPDIR/usr/libexec/limux/limux-host"
+chmod 755 "$APPDIR/usr/bin/limux" "$APPDIR/usr/libexec/limux/limux-host"
+assert_cli_entrypoint "$APPDIR/usr/bin/limux" "AppImage usr/bin/limux"
 
 # Shared library
 cp "$GHOSTTY_SO" "$APPDIR/usr/lib/libghostty.so"
