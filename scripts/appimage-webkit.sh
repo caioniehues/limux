@@ -193,6 +193,7 @@ copy_appimage_webkit_runtime() {
     local appdir="$1"
     local runtime_dest="$appdir/usr/lib/webkitgtk-6.0"
     local -a runtime_binaries=()
+    local -a app_binaries=()
     local entry
 
     if [ -z "$WEBKITGTK_RUNTIME_DIR" ]; then
@@ -210,6 +211,15 @@ copy_appimage_webkit_runtime() {
         runtime_binaries+=("$entry")
     done < <(find "$runtime_dest" -type f \( -perm -0100 -o -name '*.so*' \) | sort)
 
-    copy_appimage_library_closure "$appdir/usr/lib" "$BINARY" "$GHOSTTY_SO" "${runtime_binaries[@]}"
+    if [ -n "${CLI_BINARY:-}" ]; then
+        app_binaries+=("$CLI_BINARY")
+    fi
+    if [ -n "${HOST_BINARY:-}" ]; then
+        app_binaries+=("$HOST_BINARY")
+    elif [ -n "${BINARY:-}" ]; then
+        app_binaries+=("$BINARY")
+    fi
+
+    copy_appimage_library_closure "$appdir/usr/lib" "${app_binaries[@]}" "$GHOSTTY_SO" "${runtime_binaries[@]}"
     patch_appimage_webkit_paths "$appdir"
 }
