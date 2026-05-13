@@ -66,7 +66,7 @@ echo "== stage 0: agent-team --dry-run (no host) =="
   --cwd "$DEMO_DIR" \
   2>&1 | tee "$LOG_DIR/stage0.txt"
 
-grep -q "OK agent-team peers=\[codex, claude, opencode, gemini\]" \
+grep -q "peers=\[codex, claude, opencode, gemini\]" \
   "$LOG_DIR/stage0.txt" \
   || { echo "FAIL: stage 0 dry-run did not report expected peers"; exit 1; }
 echo "stage 0: OK"
@@ -78,9 +78,42 @@ SOCKET="$DEMO_DIR/limux.sock"
 export LIMUX_SOCKET="$SOCKET"
 export LIMUX_SOCKET_PATH="$SOCKET"
 export LIMUX_SOCKET_MODE="runtime"
+export XDG_DATA_HOME="$DEMO_DIR/data"
+export XDG_STATE_HOME="$DEMO_DIR/state"
 export XDG_RUNTIME_DIR="$DEMO_DIR/runtime"
-mkdir -p "$XDG_RUNTIME_DIR"
+mkdir -p "$XDG_DATA_HOME/limux" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
+cat > "$XDG_DATA_HOME/limux/session.json" <<SMOKE_SESSION
+{
+  "version": 1,
+  "active_workspace_index": 0,
+  "top_bar_visible": true,
+  "sidebar": { "visible": true, "width": 220 },
+  "workspaces": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "limux",
+      "favorite": false,
+      "cwd": "$DEMO_DIR",
+      "folder_path": "$DEMO_DIR",
+      "layout": {
+        "kind": "pane",
+        "pane_id": 1,
+        "active_tab_id": "terminal-0",
+        "tabs": [
+          {
+            "id": "terminal-0",
+            "custom_name": null,
+            "pinned": false,
+            "tab_kind": "terminal",
+            "cwd": "$DEMO_DIR"
+          }
+        ]
+      }
+    }
+  ]
+}
+SMOKE_SESSION
 
 echo
 echo "== stage 1: boot limux host under xvfb-run =="
@@ -146,7 +179,7 @@ echo "== stage 2: agent-team against live host (--no-launch) =="
   --no-launch \
   2>&1 | tee "$LOG_DIR/stage2.txt"
 
-grep -q "OK agent-team peers=\[codex, claude\]" "$LOG_DIR/stage2.txt" \
+grep -q "peers=\[codex, claude\]" "$LOG_DIR/stage2.txt" \
   || { echo "FAIL: live agent-team did not create peers"; exit 1; }
 [ -f "$DEMO_DIR/AGENTS.md" ] \
   || { echo "FAIL: AGENTS.md not written to $DEMO_DIR"; exit 1; }

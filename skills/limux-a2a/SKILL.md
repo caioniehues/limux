@@ -7,6 +7,24 @@ description: Use inside Limux to identify the current pane/surface/workspace, sp
 
 Use Limux itself as the live registry. Do not rely on generated files or persistent rosters. Prefer the installed `limux` command; use `./target/.../limux-cli` only when testing this repo build.
 
+## Fast Launch
+
+When asked to launch a peer from inside Limux, split first using the already-exported `LIMUX_*` values. Do not run `identify`, `list-workspaces`, or `read-screen` before the first spawn unless an env value is missing.
+
+```bash
+created="$(limux --json new-pane \
+  --workspace "$LIMUX_WORKSPACE_ID" \
+  --pane "$LIMUX_PANE_ID" \
+  --surface "$LIMUX_SURFACE_ID" \
+  --direction right \
+  --command 'claude "Task prompt here. Parent surface if you need it: '"$LIMUX_SURFACE_ID"'."')"
+
+child_surface="$(printf '%s\n' "$created" | jq -r '.surface_ref // .surface_id' | sed 's/^surface://')"
+child_pane="$(printf '%s\n' "$created" | jq -r '.pane_ref // .pane_id' | sed 's/^pane://')"
+```
+
+If the fast launch fails with `failed to connect to socket`, retry that exact `new-pane` command with approved/escalated socket access. If it fails with `Unknown option --json`, switch to the repo-built `./target/debug/limux-cli` or `./target/release/limux-cli` and retry the same command. Only after those retries should you inspect socket/listing state.
+
 ## Identity
 
 Each Limux terminal should have:
@@ -42,7 +60,7 @@ child_surface="$(printf '%s\n' "$created" | jq -r '.surface_ref // .surface_id' 
 child_pane="$(printf '%s\n' "$created" | jq -r '.pane_ref // .pane_id' | sed 's/^pane://')"
 ```
 
-`new-pane` returns the child workspace, pane, and surface IDs. Capture them immediately. Live GTK pane creation supports terminal panes.
+`new-pane` returns the child workspace, pane, and surface IDs. Capture them immediately. Live GTK pane creation supports terminal panes. For a launch request, this is the first command to run; use identity/listing commands only as fallback diagnostics.
 
 Interactive and non-interactive examples:
 

@@ -28,7 +28,22 @@ cp -a %{_builddir}/limux-%{version}/usr %{buildroot}/
 cp -a %{_builddir}/limux-%{version}/etc %{buildroot}/
 
 %post
+is_legacy_limux_host() {
+    path="$1"
+    [ -x "$path" ] || return 1
+    help="$("$path" --help 2>&1 || true)"
+    echo "$help" | grep -q "limux CLI" && return 1
+    echo "$help" | grep -q "GApplication" && return 0
+    "$path" --json identify >/tmp/limux-postinst-probe.log 2>&1 && return 1
+    grep -q "Unknown option --json" /tmp/limux-postinst-probe.log
+}
+
 ldconfig 2>/dev/null || true
+rm -f %{_libexecdir}/limux/limux
+rm -f /usr/local/libexec/limux/limux
+if is_legacy_limux_host /usr/local/bin/limux; then
+    rm -f /usr/local/bin/limux
+fi
 rm -f %{_datadir}/applications/limux.desktop
 gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || true
 update-desktop-database %{_datadir}/applications 2>/dev/null || true

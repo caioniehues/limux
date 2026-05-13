@@ -92,6 +92,29 @@ assert_cli_entrypoint() {
     fi
 }
 
+assert_no_legacy_host_entrypoint() {
+    local path="$1"
+    local label="$2"
+
+    if [ -e "$path" ]; then
+        echo "ERROR: ${label} contains legacy host entrypoint at ${path}"
+        echo "Only the CLI may be named 'limux'; the GTK host must be 'limux-host'."
+        exit 1
+    fi
+}
+
+install_desktop_file() {
+    local src="$1"
+    local dest="$2"
+    local exec_path="$3"
+
+    sed \
+        -e "s|^Exec=.*|Exec=${exec_path}|" \
+        -e "s|^TryExec=.*|TryExec=${exec_path}|" \
+        "$src" > "$dest"
+    chmod 644 "$dest"
+}
+
 resolve_ghostty_share_dir() {
     local candidate
 
@@ -284,12 +307,14 @@ populate_tree() {
     # Public CLI and private GTK host binary.
     cp "$CLI_BINARY" "$bindir/$CLI_ENTRYPOINT_NAME"
     cp "$HOST_BINARY" "$libexecdir/$HOST_ENTRYPOINT_NAME"
+    rm -f "$libexecdir/limux"
     if [ "$strip_files" = "true" ]; then
         strip "$bindir/$CLI_ENTRYPOINT_NAME"
         strip "$libexecdir/$HOST_ENTRYPOINT_NAME"
     fi
     chmod 755 "$bindir/$CLI_ENTRYPOINT_NAME" "$libexecdir/$HOST_ENTRYPOINT_NAME"
     assert_cli_entrypoint "$bindir/$CLI_ENTRYPOINT_NAME" "packaged $prefix/bin/$CLI_ENTRYPOINT_NAME"
+    assert_no_legacy_host_entrypoint "$libexecdir/limux" "packaged $prefix libexec tree"
 
     # Shared library
     cp "$GHOSTTY_SO" "$libdir/libghostty.so"
@@ -301,8 +326,9 @@ populate_tree() {
     cp -r "$GHOSTTY_SHARE_DIR"/. "$ghostty_resdir"
     copy_ghostty_terminfo_entries "$GHOSTTY_TERMINFO_DIR" "$ghostty_datadir/terminfo"
 
-    # Desktop file
-    cp "$DESKTOP_FILE" "$appdir/dev.limux.linux.desktop"
+    # Desktop file. Use the absolute CLI path so desktop launchers do not
+    # accidentally resolve an older GTK host binary named `limux` from PATH.
+    install_desktop_file "$DESKTOP_FILE" "$appdir/dev.limux.linux.desktop" "$prefix/bin/$CLI_ENTRYPOINT_NAME"
     cp "$METADATA_FILE" "$metadatadir/dev.limux.linux.metainfo.xml"
 
     # Action icons
@@ -439,6 +465,87 @@ need_root() {
     fi
 }
 
+install_desktop_file() {
+    local src="$1"
+    local dest="$2"
+    local exec_path="$3"
+
+    sed \
+        -e "s|^Exec=.*|Exec=${exec_path}|" \
+        -e "s|^TryExec=.*|TryExec=${exec_path}|" \
+        "$src" > "$dest"
+    chmod 644 "$dest"
+}
+
+legacy_limux_paths() {
+    local sudo_home=""
+
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        sudo_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+    fi
+
+    printf '%s\n' \
+        "$PREFIX/libexec/limux/limux" \
+        /usr/local/libexec/limux/limux \
+        /usr/libexec/limux/limux \
+        /usr/local/bin/limux \
+        /usr/bin/limux
+
+    if [ -n "$sudo_home" ]; then
+        printf '%s\n' \
+            "$sudo_home/.local/libexec/limux/limux" \
+            "$sudo_home/.local/bin/limux"
+    fi
+}
+
+is_legacy_limux_host() {
+    local path="$1"
+    local help
+
+    [ -x "$path" ] || return 1
+    help="$("$path" --help 2>&1 || true)"
+    printf '%s\n' "$help" | grep -q "limux CLI" && return 1
+    printf '%s\n' "$help" | grep -q "GApplication" && return 0
+    "$path" --json identify >/tmp/limux-installer-probe.log 2>&1 && return 1
+    grep -q "Unknown option --json" /tmp/limux-installer-probe.log
+}
+
+clean_legacy_limux_entrypoints() {
+    local path
+
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        [ "$path" = "$PREFIX/bin/limux" ] && continue
+        if [ "${path%/bin/limux}" != "$path" ]; then
+            if is_legacy_limux_host "$path"; then
+                rm -f "$path"
+                echo "Removed legacy Limux host entrypoint: $path"
+            fi
+        elif [ -e "$path" ]; then
+            rm -f "$path"
+            echo "Removed legacy Limux host entrypoint: $path"
+        fi
+    done <<EOF_PATHS
+$(legacy_limux_paths)
+EOF_PATHS
+}
+
+warn_if_limux_is_shadowed() {
+    local expected="$PREFIX/bin/limux"
+    local first
+
+    first="$(PATH="$PREFIX/bin:$PATH" command -v limux 2>/dev/null || true)"
+    if [ "$first" != "$expected" ]; then
+        echo "WARNING: the first limux on PATH is '$first', expected '$expected'."
+        echo "         Agent/CLI commands require the Limux CLI entrypoint."
+    fi
+
+    if ! "$expected" --help 2>&1 | grep -q "limux CLI"; then
+        echo "ERROR: installed limux entrypoint is not the CLI: $expected" >&2
+        exit 1
+    fi
+}
+
 remove_tree() {
     local path="$1"
 
@@ -480,6 +587,7 @@ need_root "$@"
 echo "Installing Limux to ${PREFIX}..."
 
 install -Dm755 "$SCRIPT_DIR/limux" "$PREFIX/bin/limux"
+clean_legacy_limux_entrypoints
 install -Dm755 "$SCRIPT_DIR/libexec/limux/limux-host" "$PREFIX/libexec/limux/limux-host"
 install -Dm644 "$SCRIPT_DIR/lib/libghostty.so" "$PREFIX/lib/limux/libghostty.so"
 if [ -d "$SCRIPT_DIR/share/limux" ]; then
@@ -488,7 +596,8 @@ fi
 echo "$PREFIX/lib/limux" > /etc/ld.so.conf.d/limux.conf
 ldconfig 2>/dev/null || true
 rm -f "$PREFIX/share/applications/limux.desktop"
-install -Dm644 "$SCRIPT_DIR/share/applications/dev.limux.linux.desktop" "$PREFIX/share/applications/dev.limux.linux.desktop"
+mkdir -p "$PREFIX/share/applications"
+install_desktop_file "$SCRIPT_DIR/share/applications/dev.limux.linux.desktop" "$PREFIX/share/applications/dev.limux.linux.desktop" "$PREFIX/bin/limux"
 install -Dm644 "$SCRIPT_DIR/share/metainfo/dev.limux.linux.metainfo.xml" "$PREFIX/share/metainfo/dev.limux.linux.metainfo.xml"
 if [ -d "$SCRIPT_DIR/share/icons" ]; then
     cp -r "$SCRIPT_DIR/share/icons/hicolor" "$PREFIX/share/icons/"
@@ -496,6 +605,7 @@ fi
 gtk-update-icon-cache -f -t "$PREFIX/share/icons/hicolor" 2>/dev/null || true
 update-desktop-database "$PREFIX/share/applications" 2>/dev/null || true
 appstreamcli refresh-cache --force 2>/dev/null || true
+warn_if_limux_is_shadowed
 
 echo ""
 echo "Limux installed successfully!"
@@ -548,7 +658,24 @@ EOF
 # Post-install: run ldconfig and update caches
 cat > "$DEB_ROOT/DEBIAN/postinst" << 'EOF'
 #!/bin/bash
+set -e
+
+is_legacy_limux_host() {
+    path="$1"
+    [ -x "$path" ] || return 1
+    help="$("$path" --help 2>&1 || true)"
+    echo "$help" | grep -q "limux CLI" && return 1
+    echo "$help" | grep -q "GApplication" && return 0
+    "$path" --json identify >/tmp/limux-postinst-probe.log 2>&1 && return 1
+    grep -q "Unknown option --json" /tmp/limux-postinst-probe.log
+}
+
 ldconfig 2>/dev/null || true
+rm -f /usr/libexec/limux/limux
+rm -f /usr/local/libexec/limux/limux
+if is_legacy_limux_host /usr/local/bin/limux; then
+    rm -f /usr/local/bin/limux
+fi
 rm -f /usr/share/applications/limux.desktop
 rm -f /usr/local/share/applications/limux.desktop
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true

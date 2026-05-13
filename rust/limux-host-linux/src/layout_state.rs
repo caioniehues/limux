@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
@@ -476,8 +477,8 @@ struct HookSessionFile {
 #[derive(Clone, Debug, Default)]
 pub struct RestorableAgentIndex {
     by_surface: HashMap<(String, String), (RestorableAgentState, f64)>,
-    by_any_workspace_surface: HashMap<String, (RestorableAgentState, f64)>,
-    by_tab_id: HashMap<String, (RestorableAgentState, f64)>,
+    by_any_workspace_surface: HashMap<String, Option<(RestorableAgentState, f64)>>,
+    by_tab_id: HashMap<String, Option<(RestorableAgentState, f64)>>,
 }
 
 impl RestorableAgentIndex {
@@ -534,14 +535,9 @@ impl RestorableAgentIndex {
                         record.updated_at,
                     ),
                 );
-                let latest_for_surface = index
-                    .by_any_workspace_surface
-                    .get(&key.1)
-                    .is_some_and(|(_, updated_at)| *updated_at > record.updated_at);
-                if !latest_for_surface {
-                    index.by_any_workspace_surface.insert(
-                        key.1,
-                        (
+                match index.by_any_workspace_surface.entry(key.1) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(Some((
                             RestorableAgentState {
                                 kind,
                                 session_id: session_id.clone(),
@@ -550,18 +546,16 @@ impl RestorableAgentIndex {
                                 restore_on_startup: true,
                             },
                             record.updated_at,
-                        ),
-                    );
+                        )));
+                    }
+                    Entry::Occupied(mut entry) => {
+                        entry.insert(None);
+                    }
                 }
                 if let Some(tab_id) = tab_id {
-                    let latest_for_tab = index
-                        .by_tab_id
-                        .get(&tab_id)
-                        .is_some_and(|(_, updated_at)| *updated_at > record.updated_at);
-                    if !latest_for_tab {
-                        index.by_tab_id.insert(
-                            tab_id,
-                            (
+                    match index.by_tab_id.entry(tab_id) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(Some((
                                 RestorableAgentState {
                                     kind,
                                     session_id: session_id.clone(),
@@ -570,8 +564,11 @@ impl RestorableAgentIndex {
                                     restore_on_startup: true,
                                 },
                                 record.updated_at,
-                            ),
-                        );
+                            )));
+                        }
+                        Entry::Occupied(mut entry) => {
+                            entry.insert(None);
+                        }
                     }
                 }
             }
@@ -591,9 +588,17 @@ impl RestorableAgentIndex {
             .and_then(|surface_id| {
                 self.by_surface
                     .get(&(workspace_id.to_string(), surface_id.clone()))
-                    .or_else(|| self.by_any_workspace_surface.get(surface_id))
+                    .or_else(|| {
+                        self.by_any_workspace_surface
+                            .get(surface_id)
+                            .and_then(|candidate| candidate.as_ref())
+                    })
             })
-            .or_else(|| self.by_tab_id.get(tab_id))
+            .or_else(|| {
+                self.by_tab_id
+                    .get(tab_id)
+                    .and_then(|candidate| candidate.as_ref())
+            })
             .map(|(agent, _)| agent.clone())
     }
 }
@@ -1208,6 +1213,62 @@ mod tests {
     }
 
     #[test]
+    fn hook_index_does_not_fall_back_to_ambiguous_surface() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("codex-hook-sessions.json"),
+            r#"{
+                "version": 1,
+                "sessions": {
+                    "session-a": {
+                        "session_id": "session-a",
+                        "workspace_id": "workspace-a",
+                        "surface_id": "29:terminal-0",
+                        "cwd": "/tmp/project-a",
+                        "pid": 1,
+                        "launch_command": {
+                            "executable": "codex",
+                            "arguments": ["codex"],
+                            "cwd": "/tmp/project-a",
+                            "environment": {},
+                            "captured_at": 10.0
+                        },
+                        "updated_at": 10.0
+                    },
+                    "session-b": {
+                        "session_id": "session-b",
+                        "workspace_id": "workspace-b",
+                        "surface_id": "29:terminal-0",
+                        "cwd": "/tmp/project-b",
+                        "pid": 2,
+                        "launch_command": {
+                            "executable": "codex",
+                            "arguments": ["codex"],
+                            "cwd": "/tmp/project-b",
+                            "environment": {},
+                            "captured_at": 11.0
+                        },
+                        "updated_at": 11.0
+                    }
+                }
+            }"#,
+        )
+        .expect("write hook state");
+        let index = RestorableAgentIndex::load_from_dir(dir.path());
+
+        assert!(
+            index
+                .agent_for_surface("workspace-c", Some(29), "terminal-0")
+                .is_none(),
+            "duplicate surfaces across workspaces must not pick an unrelated latest session"
+        );
+        let exact_agent = index
+            .agent_for_surface("workspace-a", Some(29), "terminal-0")
+            .expect("exact workspace/surface match");
+        assert_eq!(exact_agent.session_id, "session-a");
+    }
+
+    #[test]
     fn hook_index_falls_back_to_tab_id_when_pane_id_is_missing() {
         let dir = tempdir().expect("tempdir");
         fs::write(
@@ -1241,6 +1302,62 @@ mod tests {
             .expect("agent by tab id fallback");
         assert_eq!(agent.kind, RestorableAgentKind::Codex);
         assert_eq!(agent.session_id, "session-a");
+    }
+
+    #[test]
+    fn hook_index_does_not_fall_back_to_ambiguous_tab_id() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("codex-hook-sessions.json"),
+            r#"{
+                "version": 1,
+                "sessions": {
+                    "session-a": {
+                        "session_id": "session-a",
+                        "workspace_id": "workspace-a",
+                        "surface_id": "42:terminal-0",
+                        "cwd": "/tmp/project-a",
+                        "pid": 1,
+                        "launch_command": {
+                            "executable": "codex",
+                            "arguments": ["codex"],
+                            "cwd": "/tmp/project-a",
+                            "environment": {},
+                            "captured_at": 10.0
+                        },
+                        "updated_at": 10.0
+                    },
+                    "session-b": {
+                        "session_id": "session-b",
+                        "workspace_id": "workspace-b",
+                        "surface_id": "99:terminal-0",
+                        "cwd": "/tmp/project-b",
+                        "pid": 2,
+                        "launch_command": {
+                            "executable": "codex",
+                            "arguments": ["codex"],
+                            "cwd": "/tmp/project-b",
+                            "environment": {},
+                            "captured_at": 11.0
+                        },
+                        "updated_at": 11.0
+                    }
+                }
+            }"#,
+        )
+        .expect("write hook state");
+        let index = RestorableAgentIndex::load_from_dir(dir.path());
+
+        assert!(
+            index
+                .agent_for_surface("workspace-c", None, "terminal-0")
+                .is_none(),
+            "duplicate tab ids must not pick an unrelated latest session"
+        );
+        let exact_agent = index
+            .agent_for_surface("workspace-a", Some(42), "terminal-0")
+            .expect("exact surface match");
+        assert_eq!(exact_agent.session_id, "session-a");
     }
 
     #[test]

@@ -23,13 +23,13 @@ Download the latest release from [GitHub Releases](https://github.com/am-will/li
 
 **Debian/Ubuntu (.deb)** — recommended:
 ```bash
-sudo dpkg -i ./limux_0.1.18_amd64.deb
+sudo dpkg -i ./limux_0.1.19_amd64.deb
 ```
 
 **AppImage** — portable across Ubuntu 24.04-era desktops and newer, no install needed:
 ```bash
-chmod +x Limux-0.1.18-x86_64.AppImage
-./Limux-0.1.18-x86_64.AppImage
+chmod +x Limux-0.1.19-x86_64.AppImage
+./Limux-0.1.19-x86_64.AppImage
 ```
 
 Release AppImages are built and checked on the Ubuntu 24.04 `GLIBC_2.39`

@@ -24,9 +24,36 @@ use crate::settings_editor;
 use crate::shortcut_config::{NormalizedShortcut, ResolvedShortcutConfig, ShortcutId};
 use crate::terminal::{self, TerminalCallbacks};
 
+static NEXT_PANE_ID: AtomicU32 = AtomicU32::new(1);
+
 fn next_pane_id() -> u32 {
-    static COUNTER: AtomicU32 = AtomicU32::new(1);
-    COUNTER.fetch_add(1, Ordering::Relaxed)
+    NEXT_PANE_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn reserve_pane_id(id: u32) {
+    let mut current = NEXT_PANE_ID.load(Ordering::Relaxed);
+    while current <= id {
+        match NEXT_PANE_ID.compare_exchange_weak(
+            current,
+            id.saturating_add(1),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return,
+            Err(updated) => current = updated,
+        }
+    }
+}
+
+fn pane_id_for_initial_state(initial_state: Option<&PaneState>) -> u32 {
+    if let Some(id) = initial_state
+        .and_then(|state| state.pane_id)
+        .filter(|id| *id > 0)
+    {
+        reserve_pane_id(id);
+        return id;
+    }
+    next_pane_id()
 }
 
 type TabDragCallback = dyn Fn(bool);
@@ -507,7 +534,7 @@ pub fn create_pane(
         active_tab: None,
     }));
     let workspace_dragging = Rc::new(Cell::new(false));
-    let pane_id = next_pane_id();
+    let pane_id = pane_id_for_initial_state(initial_state);
     let internals = Rc::new(PaneInternals {
         pane_id,
         tab_state: tab_state.clone(),

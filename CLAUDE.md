@@ -1,161 +1,96 @@
 # CLAUDE.md — project context for Claude Code
 
-> This file is auto-loaded by Claude Code at the start of a session
-> inside the limux repo. It's a short, Claude-oriented companion to
-> [`AGENTS.md`](AGENTS.md). For full architectural depth, read
-> `AGENTS.md` and `docs/cmux-parity-plan.md`.
+Short, Claude-oriented companion to [`AGENTS.md`](AGENTS.md). For
+architecture and the full CLI surface, read `AGENTS.md`. For roadmap
+status, read [`docs/cmux-parity-plan.md`](docs/cmux-parity-plan.md).
 
 ## What is this project?
 
 Limux is a GTK4 + libadwaita + libghostty terminal workspace manager for
 Linux, ported from manaflow-ai's macOS `cmux`. It exposes a Unix-socket
-control API so coding agents (including you) can drive the GUI from a
-terminal session inside a limux workspace.
+control API so coding agents can drive the GUI from a terminal inside a
+limux workspace.
 
-## First-boot checklist (do this before editing)
+## Before editing
 
-1. **Confirm the branch and parity status:**
+Run the quality gate before *and* after your changes:
 
-   ```bash
-   git branch --show-current
-   git log --oneline main..HEAD
-   ```
+```bash
+./scripts/check.sh   # fmt --check, clippy -D warnings, test --workspace
+```
 
-   Active work has been on `feat/cmux-parity`. If you're on `main`,
-   switch. Don't rebase shipped commits without asking.
-
-2. **Run the quality gate** before *and* after your changes:
-
-   ```bash
-   ./scripts/check.sh
-   ```
-
-   This runs `cargo fmt --check`, `cargo clippy --workspace
-   --all-targets -- -D warnings`, and `cargo test --workspace`
-   (184+ tests). All three must stay green.
-
-3. **Read the living roadmap** in
-   [`docs/cmux-parity-plan.md`](docs/cmux-parity-plan.md) before
-   starting any agent-integration feature. Phases 1, 3, 4, 5 are done;
-   Phase 2 is partial; Phase 6 is deferred. Exact commits are in that
-   file and in [`AGENTS.md`](AGENTS.md).
+> **Heads-up:** as of this writing one test is failing
+> (`cli_arg_tests::hook_session_id_falls_back_to_transcript_stem`,
+> assertion at `rust/limux-cli/src/main.rs:3893`). Don't assume a clean
+> baseline — run the gate first to see the current state.
 
 ## The two-binary gotcha
 
-- `target/debug/limux` is the **GTK app** from `limux-host-linux`. It
-  only understands GTK flags — `limux --help` will show you
-  `--help-gapplication`, not `agent-team`.
-- `target/debug/limux-cli` is the **CLI** from `limux-cli`. This is
-  what implements `agent-team`, `notify`, `claude-hook`, etc.
+- `target/debug/limux` — the **GTK app** (`limux-host-linux`). Only
+  understands GTK flags. Installed users get this as `limux-host` under
+  `libexec`.
+- `target/debug/limux-cli` — the **CLI** (`limux-cli`), which implements
+  `agent-team`, `notify`, `hooks setup`, `send`, `read-screen`, etc.
+  Installed users get this as `limux`.
 
-Always test CLI subcommands with `./target/debug/limux-cli …`, not
-plain `limux`. Installed users get `limux` as the CLI, and that CLI opens
-the GTK app when run with no arguments.
+Run `./target/debug/limux-cli --help` for the full subcommand list —
+treat it as the source of truth, not this file.
 
-## Build & test cheat sheet
+## Finding code (anchors, not line numbers)
 
-```bash
-# Fast iteration (no zig / ghostty rebuild, no release profile)
-cargo check --workspace
-cargo check -p limux-host-linux           # ~5s GTK/FFI feedback
-cargo test -p limux-cli                   # CLI unit tests only
-
-# Full release (requires the vendored ghostty submodule built)
-(cd ghostty && zig build -Dapp-runtime=none -Doptimize=ReleaseFast)
-cargo build --release
-
-# Format (run before committing — rustfmt will complain about
-# multi-line push((...)) calls otherwise)
-cargo fmt
-```
-
-## Headless verification (no display required)
-
-For integration-style smoke tests, the GTK host runs under `xvfb-run`:
+The crates churn, so search by symbol:
 
 ```bash
-sudo pacman -S --needed xorg-server-xvfb     # or apt-get install -y xvfb
-
-xvfb-run -a ./target/release/limux &
-./target/release/limux-cli agent-team --agents codex,claude --cwd /tmp/demo
-./target/release/limux-cli send --workspace claude '<agent-msg …>'
-kill %1
+rg -n "fn agent_launch_command|fn build_agents_md" rust/limux-cli/src/main.rs
+rg -n "\"agent-team\" =>"                          rust/limux-cli/src/main.rs
+rg -n "PaneCallbacks \{"                           rust/limux-host-linux/src/window.rs
 ```
 
-`agent-team --dry-run` requires no host at all — it exercises the
-launcher map and the `build_agents_md` template path, which the
-`agent_team_tests` unit tests already cover.
-
-## Where to make changes — common tasks
-
-| Task | File(s) |
+| Task | Crate / module |
 |---|---|
-| Add a new agent to `agent-team` | `agent_launch_command` at `rust/limux-cli/src/main.rs:922` |
-| Tweak the auto-generated AGENTS.md template | `build_agents_md` at `rust/limux-cli/src/main.rs:1051` |
-| Add a new CLI subcommand | dispatch table near `"agent-team" => …` in `rust/limux-cli/src/main.rs:~2203` |
-| Route a new method through the GUI bridge | `rust/limux-host-linux/src/control_bridge.rs` (pass `allow_name=true` if agents target peers by workspace name) |
-| Full-vocabulary control calls (tests, no GUI) | dispatched through `limux-core::Dispatcher` + `ControlState` |
-| Surface / pane state in the UI | `rust/limux-host-linux/src/window.rs` (the single `PaneCallbacks` constructor is around line 3173) |
+| New agent in `agent-team` | `agent_launch_command` in `rust/limux-cli/src/main.rs` |
+| Generated AGENTS.md template | `build_agents_md` in `rust/limux-cli/src/main.rs` |
+| New CLI subcommand | dispatch match in `rust/limux-cli/src/main.rs` |
+| GUI bridge routing | `rust/limux-host-linux/src/control_bridge.rs` |
+| Full-vocabulary control (no GUI) | `limux-core::Dispatcher` + `ControlState` |
+| Pane / surface UI state | `rust/limux-host-linux/src/window.rs` (`PaneCallbacks`) |
+| Agent-hook installers + templates | `hooks/` + `limux hooks setup` |
+| Packaging (AppImage / AUR) | `scripts/package.sh`, `scripts/appimage-webkit.sh`, `PKGBUILD.template` |
 
-## Pitfalls — read these, they will save you
+## Pitfalls
 
-- **ID mismatch:** host-linux uses string IDs (`String` for workspace,
-  `u32` pane id, uuid `String` tab id); `limux-core` uses `u64`. Build
-  `LIMUX_SURFACE_ID` as `format!("{pane_id}:{tab_id}")`. There is no
-  `SurfaceId` type in host-linux.
-- **`PaneCallbacks` has exactly one constructor.** When you add a
-  field, the compiler points you there — don't go hunting for a second
-  call site.
-- **Ghostty `env_vars` lifetime:** Ghostty `dupeZ`s keys and values into
-  its own arena (`ghostty/src/apprt/embedded.zig:573`), so the `Vec<CString>`
-  + `Vec<ghostty_env_var_s>` pattern in `terminal.rs::create_terminal`
-  only needs to outlive the `ghostty_surface_new` call. No static
-  lifetime, no leaks. Re-realize is guarded by the early-return in the
-  realize closure.
-- **Vendored ghostty is read-only** from the limux perspective. Work
-  through the C API in `ghostty/include/ghostty.h`.
-- **Commit identity:** `am-will <william@am-will.dev>` (already
-  configured on this machine).
-- **Clippy is a hard gate.** `-D warnings` — don't disable lints to pass
-  CI; fix them.
-- **Do not commit** generated artifacts, build outputs, or `target/`.
-
-## The live user-facing CLI surface (what I ship)
-
-```bash
-# Fire a libadwaita toast + sidebar unread badge from any agent
-limux notify --subtitle "needs review" --body "blocked on auth choice" "Input needed"
-
-# Drop-in hook handlers — translate hook JSON on stdin into notify/send
-echo '{"event":"stop"}' | limux claude-hook --event stop
-
-# Multi-agent collaboration team — one workspace per agent, auto-launches
-# each CLI, writes AGENTS.md in shared cwd with the <agent-msg> protocol
-limux agent-team --agents codex,claude --cwd "$PWD"
-```
-
-The inter-agent protocol is **not** defined here. It lives in the
-**other** AGENTS.md that `limux agent-team` writes into the user's
-shared cwd at runtime. That file is regenerated each time the command
-runs — the template source is `build_agents_md` in `limux-cli/src/main.rs`.
+- **ID mismatch:** host-linux uses `String` workspace ids, `u32` pane id,
+  uuid `String` tab id; `limux-core` uses `u64`. Build `LIMUX_SURFACE_ID`
+  as `format!("{pane_id}:{tab_id}")`. There is no `SurfaceId` type in
+  host-linux.
+- **`PaneCallbacks` has one constructor.** Add a field → the compiler
+  points you there.
+- **Ghostty `env_vars` lifetime:** Ghostty `dupeZ`s keys/values into its
+  own arena, so the `Vec<CString>` + `Vec<ghostty_env_var_s>` pattern in
+  `terminal.rs::create_terminal` only needs to outlive the
+  `ghostty_surface_new` call.
+- **Vendored `ghostty/` is read-only.** Work through the C API in
+  `ghostty/include/ghostty.h`.
+- **Clippy is a hard gate** (`-D warnings`). Fix lints, don't suppress.
+- **Don't commit** `target/` or other build artifacts.
 
 ## Conventions
 
-- `main` tracks upstream. Topic branches: `feat/cmux-parity`, `fix/…`.
+- Topic branches: `fix/issue-NN-…`, `feat/…`. Don't rebase shipped
+  commits without asking.
 - Don't open PRs or issues from inside Claude Code without asking.
-- Keep one source of truth per concept: command metadata, launcher
-  maps, workspace IDs, etc.
-- Prefer small domain modules; split by domain, not vague helpers.
-- Pure logic stays separate from GTK widget wiring where possible.
-- Add regression tests when fixing behavior — see the
-  `agent_team_tests` module at the bottom of `limux-cli/src/main.rs`
-  for the expected shape.
+- Keep one source of truth per concept (command metadata, launcher maps,
+  workspace IDs).
+- Split by domain, not vague helpers. Keep pure logic separate from GTK
+  wiring where possible.
+- Add regression tests when fixing behavior — see `agent_team_tests` at
+  the bottom of `rust/limux-cli/src/main.rs` for the expected shape.
 
 ## In case of doubt
 
+- **Architecture / full CLI** → `AGENTS.md`
 - **Roadmap & phase status** → `docs/cmux-parity-plan.md`
-- **Contributor / architecture deep-dive** → `AGENTS.md`
 - **Maintainability rules** → `docs/maintainability.md`
-- **User-facing install/usage** → `README.md`
-- **Agent-to-agent message format** → the AGENTS.md written by
-  `limux agent-team` into the shared cwd (not this file)
+- **User install/usage** → `README.md`
+- **Inter-agent message format** → the AGENTS.md that `limux agent-team`
+  writes into the shared cwd at runtime (not this repo's AGENTS.md).
