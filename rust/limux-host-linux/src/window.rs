@@ -3751,7 +3751,7 @@ fn show_workspace_path_dialog(state: &State) {
     let entry_for_browse = entry.clone();
     let error_label_for_browse = error_label.clone();
     let browse_button_for_browse = browse_button.clone();
-    let transient_for_browse = active_window(&state);
+    let transient_for_browse = active_window(state);
     browse_button.connect_clicked(move |_| {
         error_label_for_browse.set_visible(false);
         browse_button_for_browse.set_sensitive(false);
