@@ -3680,6 +3680,7 @@ fn show_workspace_path_dialog(state: &State) {
         .hexpand(true)
         .activates_default(true)
         .build();
+    let browse_button = gtk::Button::with_label("Browse...");
     let error_label = gtk::Label::builder()
         .halign(gtk::Align::Start)
         .visible(false)
@@ -3695,7 +3696,14 @@ fn show_workspace_path_dialog(state: &State) {
         .margin_start(12)
         .margin_end(12)
         .build();
-    content.append(&entry);
+
+    let path_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    path_row.append(&entry);
+    path_row.append(&browse_button);
+    content.append(&path_row);
     content.append(&error_label);
 
     let buttons = gtk::Box::builder()
@@ -3713,19 +3721,23 @@ fn show_workspace_path_dialog(state: &State) {
 
     entry.grab_focus();
     entry.select_region(0, -1);
-    let state = state.clone();
+    let state_for_open = state.clone();
     let entry_for_open = entry.clone();
-    let error_label = error_label.clone();
+    let error_label_for_open = error_label.clone();
     let dialog_for_open = dialog.clone();
     open_button.connect_clicked(move |_| {
         match validate_workspace_folder_input(entry_for_open.text().as_str()) {
             Ok(selection) => {
-                create_workspace_with_folder(&state, &selection.name, selection.path_text.as_str());
+                create_workspace_with_folder(
+                    &state_for_open,
+                    &selection.name,
+                    selection.path_text.as_str(),
+                );
                 dialog_for_open.close();
             }
             Err(message) => {
-                error_label.set_label(&message);
-                error_label.set_visible(true);
+                error_label_for_open.set_label(&message);
+                error_label_for_open.set_visible(true);
                 entry_for_open.grab_focus();
             }
         }
@@ -3736,12 +3748,63 @@ fn show_workspace_path_dialog(state: &State) {
         open_button_for_entry.emit_clicked();
     });
 
+    let entry_for_browse = entry.clone();
+    let error_label_for_browse = error_label.clone();
+    let browse_button_for_browse = browse_button.clone();
+    let transient_for_browse = active_window(&state);
+    browse_button.connect_clicked(move |_| {
+        error_label_for_browse.set_visible(false);
+        browse_button_for_browse.set_sensitive(false);
+
+        let picker = gtk::FileDialog::builder()
+            .title("Choose Workspace Folder")
+            .accept_label("Choose")
+            .modal(true)
+            .build();
+
+        if let Ok(selection) = validate_workspace_folder_input(entry_for_browse.text().as_str()) {
+            picker.set_initial_folder(Some(&gio::File::for_path(selection.path_text)));
+        }
+
+        let entry_for_result = entry_for_browse.clone();
+        let error_label_for_result = error_label_for_browse.clone();
+        let browse_button_for_result = browse_button_for_browse.clone();
+        picker.select_folder(
+            transient_for_browse.as_ref(),
+            None::<&gio::Cancellable>,
+            move |result| {
+                browse_button_for_result.set_sensitive(true);
+                match result {
+                    Ok(file) => {
+                        if let Some(path) = file.path() {
+                            entry_for_result.set_text(&path.to_string_lossy());
+                            entry_for_result.grab_focus();
+                            entry_for_result.set_position(-1);
+                        }
+                    }
+                    Err(err) if is_workspace_picker_cancel(&err) => {}
+                    Err(err) => {
+                        error_label_for_result.set_label(&format!("Folder picker failed: {err}"));
+                        error_label_for_result.set_visible(true);
+                    }
+                }
+            },
+        );
+    });
+
     let dialog_for_cancel = dialog.clone();
     cancel_button.connect_clicked(move |_| {
         dialog_for_cancel.close();
     });
 
     dialog.present();
+}
+
+fn is_workspace_picker_cancel(err: &glib::Error) -> bool {
+    matches!(
+        err.kind::<gtk::DialogError>(),
+        Some(gtk::DialogError::Cancelled | gtk::DialogError::Dismissed)
+    )
 }
 
 #[derive(Debug)]
