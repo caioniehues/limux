@@ -536,6 +536,7 @@ pub fn create_pane(
     let tab_state = Rc::new(RefCell::new(TabState {
         tabs: Vec::new(),
         active_tab: None,
+        active_rename_tab: None,
     }));
     let workspace_dragging = Rc::new(Cell::new(false));
     let pane_id = pane_id_for_initial_state(initial_state);
@@ -903,6 +904,7 @@ impl TabEntry {
 struct TabState {
     tabs: Vec<TabEntry>,
     active_tab: Option<String>,
+    active_rename_tab: Option<String>,
 }
 
 /// Shared internals stored on the pane outer Box for external access.
@@ -1327,10 +1329,11 @@ fn add_terminal_tab_inner(
     let term_callbacks = make_terminal_callbacks(internals, &tab_id, &title_label, &term_cwd);
     let hover_focus = {
         let callbacks = internals.callbacks.clone();
+        let tab_state = internals.tab_state.clone();
         Rc::new(move || {
             let config = (callbacks.current_config)();
             let hover_focus = config.borrow().focus.hover_terminal_focus;
-            hover_focus
+            hover_focus && !tab_rename_active(&tab_state)
         })
     };
     let copy_selection_to_clipboard = {
@@ -2068,7 +2071,12 @@ fn build_tab_button_from_label(
         let content_stack = internals.content_stack.clone();
         let tab_state = internals.tab_state.clone();
         let callbacks = internals.callbacks.clone();
-        click.connect_pressed(move |_, _, _, _| {
+        let tab_button = tab_btn.clone();
+        click.connect_pressed(move |gesture, _, _, _| {
+            if handle_tab_interaction_while_renaming(&tab_button, &tab_state) {
+                gesture.set_state(gtk::EventSequenceState::Denied);
+                return;
+            }
             activate_tab(&tab_strip, &content_stack, &tab_state, &tab_id);
             (callbacks.on_state_changed)();
         });
@@ -2089,8 +2097,14 @@ fn build_tab_button_from_label(
             pin_icon: pin_icon.clone(),
         };
         let tab_button = tab_btn.clone();
-        right_click.connect_pressed(move |_, _, _, _| {
+        let tab_state = internals.tab_state.clone();
+        right_click.connect_pressed(move |gesture, _, _, _| {
+            if handle_tab_interaction_while_renaming(&tab_button, &tab_state) {
+                gesture.set_state(gtk::EventSequenceState::Denied);
+                return;
+            }
             show_tab_context_menu(&tab_button, &tab_id, &context);
+            gesture.set_state(gtk::EventSequenceState::Claimed);
         });
     }
     tab_btn.add_controller(right_click);
@@ -2100,7 +2114,11 @@ fn build_tab_button_from_label(
     {
         let tab_id = tab_id.to_string();
         let pane_id = internals.pane_id;
+        let tab_state = internals.tab_state.clone();
         drag_source.connect_prepare(move |_src, _x, _y| {
+            if tab_rename_active(&tab_state) {
+                return None;
+            }
             let payload = glib::Value::from(&TabDragPayload::new(pane_id, &tab_id).encode());
             Some(gtk::gdk::ContentProvider::for_value(&payload))
         });
@@ -2180,9 +2198,17 @@ fn show_tab_context_menu(tab_btn: &gtk::Box, tab_id: &str, context: &TabContextM
         let tid = tab_id.to_string();
         let menu_ref = menu.clone();
         let callbacks = context.callbacks.clone();
+        let tab_strip = context.tab_strip.clone();
         rename_btn.connect_clicked(move |_| {
             menu_ref.popdown();
-            show_rename_dialog(&lbl, &state, &tid, &callbacks);
+            let tab_strip = tab_strip.clone();
+            let lbl = lbl.clone();
+            let state = state.clone();
+            let tid = tid.clone();
+            let callbacks = callbacks.clone();
+            glib::idle_add_local_once(move || {
+                show_rename_dialog(&tab_strip, &lbl, &state, &tid, &callbacks);
+            });
         });
     }
 
@@ -2260,7 +2286,89 @@ fn show_tab_context_menu(tab_btn: &gtk::Box, tab_id: &str, context: &TabContextM
     menu.popup();
 }
 
+fn find_tab_rename_entry<W: glib::object::IsA<gtk::Widget>>(root: &W) -> Option<gtk::Entry> {
+    fn find_entry(widget: &gtk::Widget) -> Option<gtk::Entry> {
+        if let Some(entry) = widget.downcast_ref::<gtk::Entry>() {
+            if entry.has_css_class(TAB_RENAME_ENTRY_CSS_CLASS) {
+                return Some(entry.clone());
+            }
+        }
+
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            if let Some(entry) = find_entry(&current) {
+                return Some(entry);
+            }
+            child = current.next_sibling();
+        }
+
+        None
+    }
+
+    find_entry(root.as_ref())
+}
+
+fn find_active_tab_rename_entry(tab_state: &Rc<RefCell<TabState>>) -> Option<gtk::Entry> {
+    let buttons: Vec<gtk::Box> = {
+        let state = tab_state.borrow();
+        if let Some(active_id) = state.active_rename_tab.as_deref() {
+            state
+                .tabs
+                .iter()
+                .filter(|entry| entry.id == active_id)
+                .map(|entry| entry.tab_button.clone())
+                .collect()
+        } else {
+            state
+                .tabs
+                .iter()
+                .map(|entry| entry.tab_button.clone())
+                .collect()
+        }
+    };
+
+    buttons
+        .into_iter()
+        .find_map(|button| find_tab_rename_entry(&button))
+}
+
+fn tab_rename_active(tab_state: &Rc<RefCell<TabState>>) -> bool {
+    if find_active_tab_rename_entry(tab_state).is_some() {
+        return true;
+    }
+    tab_state.borrow_mut().active_rename_tab = None;
+    false
+}
+
+fn focus_tab_rename_entry(entry: &gtk::Entry) {
+    if !entry.has_focus() {
+        entry.grab_focus();
+        entry.select_region(0, -1);
+    }
+}
+
+fn commit_active_tab_rename(tab_state: &Rc<RefCell<TabState>>) -> bool {
+    let Some(entry) = find_active_tab_rename_entry(tab_state) else {
+        tab_state.borrow_mut().active_rename_tab = None;
+        return false;
+    };
+    entry.emit_activate();
+    true
+}
+
+fn handle_tab_interaction_while_renaming(
+    tab_button: &gtk::Box,
+    tab_state: &Rc<RefCell<TabState>>,
+) -> bool {
+    if let Some(entry) = find_tab_rename_entry(tab_button) {
+        focus_tab_rename_entry(&entry);
+        return true;
+    }
+    commit_active_tab_rename(tab_state)
+}
+
 fn show_rename_dialog(
+    tab_strip: &gtk::Box,
     label: &gtk::Label,
     tab_state: &Rc<RefCell<TabState>>,
     tab_id: &str,
@@ -2274,6 +2382,19 @@ fn show_rename_dialog(
         return;
     };
 
+    if let Some(entry) = find_tab_rename_entry(&parent) {
+        parent.set_can_target(true);
+        focus_tab_rename_entry(&entry);
+        return;
+    }
+
+    if let Some(entry) = find_tab_rename_entry(tab_strip) {
+        entry.emit_activate();
+    }
+
+    let parent_was_targetable = parent.can_target();
+    parent.set_can_target(true);
+
     let entry = gtk::Entry::builder()
         .text(&current_name)
         .width_chars(15)
@@ -2285,10 +2406,10 @@ fn show_rename_dialog(
     label.set_visible(false);
     // Insert entry before the close button
     parent.insert_child_after(&entry, Some(label));
-    entry.grab_focus();
-    entry.select_region(0, -1);
+    tab_state.borrow_mut().active_rename_tab = Some(tab_id.to_string());
+    focus_tab_rename_entry(&entry);
 
-    // On activate (Enter) or focus-out, commit rename
+    // On activate (Enter) or blur, commit rename.
     let lbl = label.clone();
     let state = tab_state.clone();
     let tid = tab_id.to_string();
@@ -2317,7 +2438,13 @@ fn show_rename_dialog(
                 }
             }
             lbl.set_visible(true);
-            parent.remove(entry);
+            if entry.parent().is_some() {
+                parent.remove(entry);
+            }
+            parent.set_can_target(parent_was_targetable);
+            if state.borrow().active_rename_tab.as_deref() == Some(tid.as_str()) {
+                state.borrow_mut().active_rename_tab = None;
+            }
             (callbacks.on_state_changed)();
         }
     };
@@ -2330,15 +2457,18 @@ fn show_rename_dialog(
     }
     {
         let do_rename = do_rename.clone();
-        let focus_controller = gtk::EventControllerFocus::new();
-        focus_controller.connect_leave(move |ctrl| {
-            if let Some(widget) = ctrl.widget() {
-                if let Some(entry) = widget.downcast_ref::<gtk::Entry>() {
-                    do_rename(entry);
-                }
+        entry.connect_notify_local(Some("has-focus"), move |entry, _| {
+            if entry.has_focus() {
+                return;
             }
+            let do_rename = do_rename.clone();
+            let entry = entry.clone();
+            glib::idle_add_local_once(move || {
+                if !entry.has_focus() && entry.parent().is_some() {
+                    do_rename(&entry);
+                }
+            });
         });
-        entry.add_controller(focus_controller);
     }
 }
 
@@ -2535,6 +2665,8 @@ fn reorder_tab_to_index(
     source_id: &str,
     insert_idx: usize,
 ) -> bool {
+    commit_active_tab_rename(tab_state);
+
     let mut state = tab_state.borrow_mut();
     let Some(source_idx) = state.tabs.iter().position(|entry| entry.id == source_id) else {
         return false;
@@ -2559,6 +2691,9 @@ fn transfer_tab_between_panes(
     if source.pane_id == target.pane_id {
         return false;
     }
+
+    commit_active_tab_rename(&source.tab_state);
+    commit_active_tab_rename(&target.tab_state);
 
     let (mut entry, source_next_active) = {
         let mut source_state = source.tab_state.borrow_mut();
@@ -2868,6 +3003,8 @@ fn remove_tab(
     pane_outer: &gtk::Box,
     empty_reason: PaneEmptyReason,
 ) {
+    commit_active_tab_rename(tab_state);
+
     let mut ts = tab_state.borrow_mut();
     let Some(idx) = ts.tabs.iter().position(|e| e.id == tab_id) else {
         return;
