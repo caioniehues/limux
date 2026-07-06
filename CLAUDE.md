@@ -54,6 +54,7 @@ rg -n "PaneCallbacks \{"                           rust/limux-host-linux/src/win
 | GUI bridge routing | `rust/limux-host-linux/src/control_bridge.rs` |
 | Full-vocabulary control (no GUI) | `limux-core::Dispatcher` + `ControlState` |
 | Pane / surface UI state | `rust/limux-host-linux/src/window.rs` (`PaneCallbacks`) |
+| Terminal IME / dead-key / compose | `rust/limux-host-linux/src/ime/` (`state.rs` state machine, `routing.rs` decide_routing / is_compose_initiator, `contexts.rs` GTK + ghostty wiring) |
 | Agent-hook installers + templates | `hooks/` + `limux hooks setup` |
 | Packaging (AppImage / AUR) | `scripts/package.sh`, `scripts/appimage-webkit.sh`, `PKGBUILD.template` |
 
@@ -80,6 +81,16 @@ rg -n "PaneCallbacks \{"                           rust/limux-host-linux/src/win
   `assert_pixbuf_svg_loader_bundle`; gate releases on
   `LIMUX_REQUIRE_SVG_LOADER=1` to make a missing loader a hard
   failure.
+- **Don't route dead-key / compose events through `IMMulticontext`
+  on Wayland.** GTK's "wayland" slave (default on Plasma 6 without
+  ibus/fcitx5) claims dead keys over text-input-v3 without ever
+  committing — the dead-key glyph flashes and the compose silently
+  aborts. The terminal pane pairs `IMMulticontext` with a parallel
+  `IMContextSimple` that drives libxkbcommon's compose tables; for
+  compose initiators (`XK_dead_*`, `Multi_key`) and in-flight
+  compose sequences, `filter_key_event` in `ime.rs` bypasses the
+  multicontext entirely. Preserve that bypass when touching keyboard
+  routing.
 - **Clippy is a hard gate** (`-D warnings`). Fix lints, don't suppress.
 - **Don't commit** `target/` or other build artifacts.
 

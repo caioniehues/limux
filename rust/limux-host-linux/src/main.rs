@@ -1,6 +1,7 @@
 mod app_config;
 mod control_bridge;
 mod ghostty_config;
+mod ime;
 mod keybind_editor;
 mod layout_state;
 mod pane;
