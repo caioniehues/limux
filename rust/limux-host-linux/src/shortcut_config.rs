@@ -29,6 +29,7 @@ pub enum ShortcutId {
     NewTerminalInFocusedPane,
     SplitRight,
     CloseFocusedPane,
+    CloseFocusedTab,
     ToggleFocusedPaneZoom,
     NewTerminal,
     FocusLeft,
@@ -81,6 +82,7 @@ pub enum ShortcutCommand {
     NewTerminal,
     SplitRight,
     CloseFocusedPane,
+    CloseFocusedTab,
     ToggleFocusedPaneZoom,
     FocusLeft,
     FocusRight,
@@ -311,7 +313,7 @@ struct ShortcutConfigFile {
     shortcuts: HashMap<String, serde_json::Value>,
 }
 
-const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 48] = [
+const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
     ShortcutDefinition {
         id: ShortcutId::NewWorkspace,
         config_key: "new_workspace",
@@ -327,7 +329,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 48] = [
         id: ShortcutId::CloseWorkspace,
         config_key: "close_workspace",
         action_name: "win.close-workspace",
-        default_accel: "<Ctrl><Shift>w",
+        default_accel: "<Ctrl><Alt><Shift>w",
         label: "Close Workspace",
         registers_gtk_accel: true,
         command: ShortcutCommand::CloseWorkspace,
@@ -470,10 +472,21 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 48] = [
         id: ShortcutId::CloseFocusedPane,
         config_key: "close_focused_pane",
         action_name: "win.close-focused-pane",
-        default_accel: "<Ctrl>w",
+        default_accel: "<Ctrl><Alt>w",
         label: "Close Focused Pane",
         registers_gtk_accel: false,
         command: ShortcutCommand::CloseFocusedPane,
+        scope: ShortcutScope::Window,
+        editable_capture_policy: EditableCapturePolicy::BypassInEditable,
+    },
+    ShortcutDefinition {
+        id: ShortcutId::CloseFocusedTab,
+        config_key: "close_focused_tab",
+        action_name: "win.close-focused-tab",
+        default_accel: "<Ctrl><Shift>w",
+        label: "Close Focused Tab",
+        registers_gtk_accel: false,
+        command: ShortcutCommand::CloseFocusedTab,
         scope: ShortcutScope::Window,
         editable_capture_policy: EditableCapturePolicy::BypassInEditable,
     },
@@ -1702,7 +1715,7 @@ mod tests {
 
     #[test]
     fn definitions_cover_current_host_shortcuts() {
-        assert_eq!(definitions().len(), 48);
+        assert_eq!(definitions().len(), 49);
     }
 
     #[test]
@@ -2196,6 +2209,15 @@ mod tests {
             resolved.command_for_runtime_combo("ctrl+shift+t"),
             Some(ShortcutCommand::NewTerminal)
         );
+        assert_eq!(resolved.command_for_runtime_combo("ctrl+w"), None);
+        assert_eq!(
+            resolved.command_for_runtime_combo("ctrl+shift+w"),
+            Some(ShortcutCommand::CloseFocusedTab)
+        );
+        assert_eq!(
+            resolved.command_for_runtime_combo("ctrl+alt+w"),
+            Some(ShortcutCommand::CloseFocusedPane)
+        );
         assert_eq!(
             resolved.command_for_runtime_combo("ctrl+9"),
             Some(ShortcutCommand::ActivateLastWorkspace)
@@ -2218,6 +2240,18 @@ mod tests {
                 .map(ResolvedShortcut::default_display_label)
                 .as_deref(),
             Some("Ctrl+D")
+        );
+        assert_eq!(
+            resolved
+                .default_display_label_for_id(ShortcutId::CloseFocusedTab)
+                .as_deref(),
+            Some("Ctrl+Shift+W")
+        );
+        assert_eq!(
+            resolved
+                .default_display_label_for_id(ShortcutId::CloseFocusedPane)
+                .as_deref(),
+            Some("Ctrl+Alt+W")
         );
         assert_eq!(
             resolved

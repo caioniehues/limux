@@ -71,6 +71,14 @@ struct SurfaceEntry {
 
 struct ClipboardContext {
     surface: Cell<ghostty_surface_t>,
+    copy_selection_to_clipboard: Rc<dyn Fn() -> bool>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ClipboardWritePolicy {
+    write_clipboard: bool,
+    write_primary: bool,
+    show_toast: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -206,6 +214,18 @@ impl TerminalHandle {
         let surface = *self.surface_cell.borrow();
         surface_action(surface, action);
         surface.is_some()
+    }
+
+    pub fn copy_selection_to_clipboard(&self) -> bool {
+        let Some(surface) = *self.surface_cell.borrow() else {
+            return false;
+        };
+        if !unsafe { ghostty_surface_has_selection(surface) } {
+            return false;
+        }
+
+        surface_action(Some(surface), "copy_to_clipboard");
+        true
     }
 
     /// Inject text into the terminal surface for control-socket requests and
@@ -865,6 +885,15 @@ unsafe fn clipboard_surface_from_userdata(userdata: *mut c_void) -> Option<ghost
     }
 }
 
+unsafe fn clipboard_context_from_userdata(
+    userdata: *mut c_void,
+) -> Option<&'static ClipboardContext> {
+    if userdata.is_null() {
+        return None;
+    }
+    Some(unsafe { &*(userdata as *const ClipboardContext) })
+}
+
 fn clipboard_read_text_cstring(text: Option<&str>) -> CString {
     CString::new(text.unwrap_or_default().replace('\0', ""))
         .expect("clipboard text should not contain NUL bytes")
@@ -1024,19 +1053,19 @@ unsafe extern "C" fn ghostty_write_clipboard_cb(
         None => return,
     };
 
-    // Write to the requested clipboard
-    let clipboard = if clipboard_type == GHOSTTY_CLIPBOARD_SELECTION {
-        display.primary_clipboard()
-    } else {
-        display.clipboard()
-    };
-    clipboard.set_text(&text);
+    let copy_selection_to_clipboard = unsafe { clipboard_context_from_userdata(userdata) }
+        .map(|context| (context.copy_selection_to_clipboard)())
+        .unwrap_or(true);
+    let policy = clipboard_write_policy(clipboard_type, copy_selection_to_clipboard);
 
-    // Also set the other clipboard for convenience
-    if clipboard_type == GHOSTTY_CLIPBOARD_SELECTION {
+    if policy.write_clipboard {
         display.clipboard().set_text(&text);
-    } else {
+    }
+    if policy.write_primary {
         display.primary_clipboard().set_text(&text);
+    }
+    if !policy.show_toast {
+        return;
     }
 
     // Show "Copied to clipboard" toast on the surface's overlay
@@ -1049,6 +1078,25 @@ unsafe extern "C" fn ghostty_write_clipboard_cb(
             show_clipboard_toast(&entry.toast_overlay);
         }
     });
+}
+
+fn clipboard_write_policy(
+    clipboard_type: c_int,
+    copy_selection_to_clipboard: bool,
+) -> ClipboardWritePolicy {
+    if clipboard_type == GHOSTTY_CLIPBOARD_SELECTION {
+        ClipboardWritePolicy {
+            write_clipboard: copy_selection_to_clipboard,
+            write_primary: true,
+            show_toast: copy_selection_to_clipboard,
+        }
+    } else {
+        ClipboardWritePolicy {
+            write_clipboard: true,
+            write_primary: true,
+            show_toast: true,
+        }
+    }
 }
 
 unsafe extern "C" fn ghostty_close_surface_cb(userdata: *mut c_void, _process_alive: bool) {
@@ -1088,6 +1136,7 @@ pub struct TerminalCallbacks {
 
 pub struct TerminalOptions {
     pub hover_focus: Rc<dyn Fn() -> bool>,
+    pub copy_selection_to_clipboard: Rc<dyn Fn() -> bool>,
     pub saved_font_size: Option<f32>,
     pub startup_command: Option<String>,
     /// Extra environment variables to expose to the spawned shell
@@ -1104,6 +1153,7 @@ impl Default for TerminalOptions {
     fn default() -> Self {
         Self {
             hover_focus: Rc::new(|| false),
+            copy_selection_to_clipboard: Rc::new(|| true),
             saved_font_size: None,
             startup_command: None,
             extra_env: Vec::new(),
@@ -1138,6 +1188,7 @@ pub fn create_terminal(
     let saved_font_size = options.saved_font_size;
     let startup_command = options.startup_command;
     let hover_focus = options.hover_focus;
+    let copy_selection_to_clipboard = options.copy_selection_to_clipboard;
     let extra_env = options.extra_env;
     let callbacks = Rc::new(RefCell::new(callbacks));
     let surface_cell: Rc<RefCell<Option<ghostty_surface_t>>> = Rc::new(RefCell::new(None));
@@ -1302,6 +1353,7 @@ pub fn create_terminal(
             let mut config = unsafe { ghostty_surface_config_new() };
             let clipboard_context = Box::into_raw(Box::new(ClipboardContext {
                 surface: Cell::new(ptr::null_mut()),
+                copy_selection_to_clipboard: copy_selection_to_clipboard.clone(),
             }));
             config.platform_tag = GHOSTTY_PLATFORM_LINUX;
             config.platform = ghostty_platform_u {
@@ -2480,6 +2532,34 @@ mod tests {
         let text = CString::new("clipboard").unwrap();
 
         assert_eq!(clipboard_completion_text_ptr(text.as_ptr()), text.as_ptr());
+    }
+
+    #[test]
+    fn clipboard_write_policy_can_disable_selection_to_regular_clipboard() {
+        assert_eq!(
+            clipboard_write_policy(GHOSTTY_CLIPBOARD_SELECTION, false),
+            ClipboardWritePolicy {
+                write_clipboard: false,
+                write_primary: true,
+                show_toast: false,
+            }
+        );
+        assert_eq!(
+            clipboard_write_policy(GHOSTTY_CLIPBOARD_SELECTION, true),
+            ClipboardWritePolicy {
+                write_clipboard: true,
+                write_primary: true,
+                show_toast: true,
+            }
+        );
+        assert_eq!(
+            clipboard_write_policy(GHOSTTY_CLIPBOARD_STANDARD, false),
+            ClipboardWritePolicy {
+                write_clipboard: true,
+                write_primary: true,
+                show_toast: true,
+            }
+        );
     }
 
     #[test]

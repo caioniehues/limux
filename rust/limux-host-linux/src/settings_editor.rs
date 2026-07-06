@@ -172,6 +172,19 @@ fn build_general_page(input: &SettingsEditorInput) -> gtk::Widget {
     hover_row.set_activatable_widget(Some(&hover_switch));
     group.add(&hover_row);
 
+    let auto_copy_row = adw::ActionRow::builder()
+        .title("Copy selection automatically")
+        .subtitle("Copy selected terminal text to the regular clipboard")
+        .build();
+    auto_copy_row.set_title_lines(1);
+    auto_copy_row.set_subtitle_lines(2);
+    let auto_copy_switch = gtk::Switch::new();
+    auto_copy_switch.set_active(input.config.borrow().clipboard.copy_selection_to_clipboard);
+    auto_copy_switch.set_valign(gtk::Align::Center);
+    auto_copy_row.add_suffix(&auto_copy_switch);
+    auto_copy_row.set_activatable_widget(Some(&auto_copy_switch));
+    group.add(&auto_copy_row);
+
     page.add(&group);
 
     {
@@ -209,6 +222,16 @@ fn build_general_page(input: &SettingsEditorInput) -> gtk::Widget {
             let hover_terminal_focus = switch.is_active();
             apply_config_change(&config, &*on_changed, move |c| {
                 c.focus.hover_terminal_focus = hover_terminal_focus;
+            });
+        });
+    }
+    {
+        let config = input.config.clone();
+        let on_changed = input.on_config_changed.clone();
+        auto_copy_switch.connect_active_notify(move |switch| {
+            let copy_selection_to_clipboard = switch.is_active();
+            apply_config_change(&config, &*on_changed, move |c| {
+                c.clipboard.copy_selection_to_clipboard = copy_selection_to_clipboard;
             });
         });
     }

@@ -2118,6 +2118,10 @@ fn dispatch_shortcut_command(state: &State, command: ShortcutCommand) -> bool {
             true
         }
         ShortcutCommand::CloseFocusedPane => {
+            close_focused_pane(state);
+            true
+        }
+        ShortcutCommand::CloseFocusedTab => {
             close_focused_tab(state);
             true
         }
@@ -5265,7 +5269,7 @@ fn dispatch_terminal_command(state: &State, command: ShortcutCommand) -> bool {
         ShortcutCommand::SurfaceFindHide => target.hide_find(),
         ShortcutCommand::SurfaceUseSelectionForFind => target.use_selection_for_find(),
         ShortcutCommand::TerminalClearScrollback => target.perform_binding_action("clear_screen"),
-        ShortcutCommand::TerminalCopy => target.perform_binding_action("copy_to_clipboard"),
+        ShortcutCommand::TerminalCopy => target.copy_selection_to_clipboard(),
         ShortcutCommand::TerminalPaste => target.perform_binding_action("paste_from_clipboard"),
         ShortcutCommand::TerminalIncreaseFontSize => persist_font_size_delta(state, 1.0),
         ShortcutCommand::TerminalDecreaseFontSize => persist_font_size_delta(state, -1.0),
@@ -5392,7 +5396,7 @@ fn cycle_focused_pane_tab(state: &State, delta: i32) {
     }
 }
 
-fn close_focused_tab(state: &State) {
+fn close_focused_pane(state: &State) {
     if let Some((ws_id, pane_widget)) = find_focused_pane(state) {
         let parent = pane_widget.parent();
         // If this is the only pane (parent is Stack), don't close — keep workspace alive
@@ -5402,6 +5406,24 @@ fn close_focused_tab(state: &State) {
             }
         }
         remove_pane(state, &ws_id, &pane_widget);
+    }
+}
+
+fn close_focused_tab(state: &State) {
+    let Some((_ws_id, pane_widget)) = find_focused_pane(state) else {
+        return;
+    };
+
+    if let Some(parent) = pane_widget.parent() {
+        if parent.downcast_ref::<gtk::Stack>().is_some()
+            && pane::tab_count_in_pane(&pane_widget) <= 1
+        {
+            return;
+        }
+    }
+
+    if let Some(tab_id) = pane::active_tab_in_pane(&pane_widget) {
+        pane::close_tab_in_pane(&pane_widget, &tab_id);
     }
 }
 
@@ -6398,6 +6420,30 @@ mod tests {
                 gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK
             ),
             Some(ShortcutCommand::TerminalCopy)
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::W,
+                gdk::ModifierType::CONTROL_MASK
+            ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::W,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK
+            ),
+            Some(ShortcutCommand::CloseFocusedTab)
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::W,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
+            ),
+            Some(ShortcutCommand::CloseFocusedPane)
         );
         assert_eq!(
             shortcut_command_from_key_event(

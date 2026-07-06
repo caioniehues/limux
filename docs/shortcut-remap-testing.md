@@ -104,7 +104,7 @@ These are the current supported config keys and defaults:
 | Config key | Default |
 |---|---|
 | `new_workspace` | `<Ctrl><Shift>n` |
-| `close_workspace` | `<Ctrl><Shift>w` |
+| `close_workspace` | `<Ctrl><Alt><Shift>w` |
 | `quit_app` | `<Ctrl>q` |
 | `new_instance` | `<Ctrl><Alt>n` |
 | `toggle_sidebar` | `<Ctrl>m` |
@@ -117,7 +117,8 @@ These are the current supported config keys and defaults:
 | `split_down` | `<Ctrl><Shift>d` |
 | `new_terminal_in_focused_pane` | `<Ctrl><Shift>t` |
 | `split_right` | `<Ctrl>d` |
-| `close_focused_pane` | `<Ctrl>w` |
+| `close_focused_pane` | `<Ctrl><Alt>w` |
+| `close_focused_tab` | `<Ctrl><Shift>w` |
 | `toggle_focused_pane_zoom` | `<Ctrl><Shift>z` |
 | `new_terminal` | `<Ctrl>t` |
 | `focus_left` | `<Ctrl>Left` |
@@ -256,7 +257,9 @@ Launch Limux and verify:
 - `Ctrl+T` opens a terminal tab
 - `Ctrl+D` splits right
 - `Ctrl+Shift+D` splits down
-- `Ctrl+W` closes the focused pane
+- `Ctrl+W` reaches the focused terminal
+- `Ctrl+Shift+W` closes the focused tab
+- `Ctrl+Alt+W` closes the focused pane
 - `Ctrl+Page_Down` and `Ctrl+Page_Up` switch workspaces
 - pane button tooltips show the default shortcut suffixes where applicable
 - `Ctrl+Q` quits Limux
@@ -307,18 +310,18 @@ Create:
 {
   "shortcuts": {
     "new_terminal": "<Ctrl><Alt>t",
-    "close_focused_pane": "<Ctrl><Alt>w"
+    "close_focused_pane": "<Ctrl><Alt><BackSpace>"
   }
 }
 ```
 
 Restart Limux and verify:
 
-- pane button tooltips show `Ctrl+Alt+T` and `Ctrl+Alt+W`
+- pane button tooltips show `Ctrl+Alt+T` and `Ctrl+Alt+BackSpace`
 - `Ctrl+Alt+T` opens a terminal tab
 - `Ctrl+T` no longer opens a terminal tab
-- `Ctrl+Alt+W` closes the focused pane
-- `Ctrl+W` no longer closes the pane
+- `Ctrl+Alt+BackSpace` closes the focused pane
+- `Ctrl+Alt+W` no longer closes the pane
 
 ### 5. Duplicate-Binding Rejection
 

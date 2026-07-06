@@ -243,6 +243,10 @@ impl TerminalShortcutTarget {
         self.handle.perform_binding_action(action)
     }
 
+    pub fn copy_selection_to_clipboard(&self) -> bool {
+        self.handle.copy_selection_to_clipboard()
+    }
+
     pub fn show_find(&self) -> bool {
         self.handle.show_find()
     }
@@ -683,6 +687,45 @@ pub fn focus_active_tab_in_pane(pane_widget: &gtk::Widget) -> bool {
         &internals.content_stack,
         &internals.tab_state,
         &tab_id,
+    );
+    true
+}
+
+pub fn active_tab_in_pane(pane_widget: &gtk::Widget) -> Option<String> {
+    let internals = find_pane_internals(pane_widget)?;
+    let active_tab = internals.tab_state.borrow().active_tab.clone();
+    active_tab
+}
+
+pub fn tab_count_in_pane(pane_widget: &gtk::Widget) -> usize {
+    find_pane_internals(pane_widget)
+        .map(|internals| internals.tab_state.borrow().tabs.len())
+        .unwrap_or_default()
+}
+
+pub fn close_tab_in_pane(pane_widget: &gtk::Widget, tab_id: &str) -> bool {
+    let Some(internals) = find_pane_internals(pane_widget) else {
+        return false;
+    };
+
+    let is_pinned = internals
+        .tab_state
+        .borrow()
+        .tabs
+        .iter()
+        .any(|entry| entry.id == tab_id && entry.pinned);
+    if is_pinned {
+        return false;
+    }
+
+    remove_tab(
+        &internals.tab_strip,
+        &internals.content_stack,
+        &internals.tab_state,
+        tab_id,
+        &internals.callbacks,
+        &internals.pane_outer,
+        PaneEmptyReason::ClosedLastTab,
     );
     true
 }
@@ -1216,6 +1259,14 @@ fn add_terminal_tab_inner(
             hover_focus
         })
     };
+    let copy_selection_to_clipboard = {
+        let callbacks = internals.callbacks.clone();
+        Rc::new(move || {
+            let config = (callbacks.current_config)();
+            let copy_selection_to_clipboard = config.borrow().clipboard.copy_selection_to_clipboard;
+            copy_selection_to_clipboard
+        })
+    };
 
     // Build the env the spawned shell will see. Encodes this terminal's
     // identity so CLI calls (e.g. `limux identify`, `limux send`) auto-target
@@ -1253,6 +1304,7 @@ fn add_terminal_tab_inner(
         working_directory,
         terminal::TerminalOptions {
             hover_focus,
+            copy_selection_to_clipboard,
             saved_font_size: (internals.callbacks.current_config)().borrow().font_size,
             startup_command,
             extra_env,

@@ -214,12 +214,13 @@ Most default shortcuts use `Ctrl`. Fullscreen defaults to `F11`. Custom remaps m
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Shift+N` | New workspace (folder picker) |
-| `Ctrl+Shift+W` | Close workspace |
+| `Ctrl+Alt+Shift+W` | Close workspace |
 | `Ctrl+Shift+Left/Right` | Cycle tabs in focused pane |
 | `Ctrl+Shift+D` | Split down |
 | `Ctrl+Shift+T` | New terminal tab in the focused pane |
 | `Ctrl+D` | Split right |
-| `Ctrl+W` | Close focused pane |
+| `Ctrl+Shift+W` | Close focused tab |
+| `Ctrl+Alt+W` | Close focused pane |
 | `Ctrl+Shift+Z` | Toggle focused pane zoom |
 | `Ctrl+M` | Toggle sidebar |
 | `Ctrl+Shift+M` | Toggle top bar |

@@ -45,6 +45,8 @@ pub struct AppConfig {
     #[serde(skip)]
     pub notifications: NotificationConfig,
     #[serde(skip)]
+    pub clipboard: ClipboardConfig,
+    #[serde(skip)]
     pub font_size: Option<f32>,
 }
 
@@ -58,6 +60,19 @@ pub struct AppearanceConfig {
 pub struct FocusConfig {
     #[serde(default)]
     pub hover_terminal_focus: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipboardConfig {
+    pub copy_selection_to_clipboard: bool,
+}
+
+impl Default for ClipboardConfig {
+    fn default() -> Self {
+        Self {
+            copy_selection_to_clipboard: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -250,6 +265,13 @@ fn parse_app_config_value(root: &Value) -> AppConfig {
         .and_then(NotificationSound::from_str)
         .unwrap_or(notification_defaults.sound);
 
+    let clipboard = root.get("clipboard").and_then(Value::as_object);
+    let clipboard_defaults = ClipboardConfig::default();
+    let copy_selection_to_clipboard = clipboard
+        .and_then(|clipboard| clipboard.get("copy_selection_to_clipboard"))
+        .and_then(Value::as_bool)
+        .unwrap_or(clipboard_defaults.copy_selection_to_clipboard);
+
     let font_size = root
         .get("font_size")
         .and_then(Value::as_f64)
@@ -267,6 +289,9 @@ fn parse_app_config_value(root: &Value) -> AppConfig {
         notifications: NotificationConfig {
             enabled: notifications_enabled,
             sound: notification_sound,
+        },
+        clipboard: ClipboardConfig {
+            copy_selection_to_clipboard,
         },
         font_size,
     }
@@ -300,6 +325,12 @@ fn save_to_path(path: &Path, config: &AppConfig) -> Result<(), String> {
         json!({
             "enabled": config.notifications.enabled,
             "sound": config.notifications.sound.as_str(),
+        }),
+    );
+    root.insert(
+        "clipboard".to_string(),
+        json!({
+            "copy_selection_to_clipboard": config.clipboard.copy_selection_to_clipboard,
         }),
     );
 
@@ -419,6 +450,9 @@ fn ensure_default_config_file(path: &Path) -> std::io::Result<()> {
         "notifications": {
             "enabled": true,
             "sound": "default"
+        },
+        "clipboard": {
+            "copy_selection_to_clipboard": true
         }
     });
     let serialized = serde_json::to_string_pretty(&default_root)
@@ -475,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_default_config_file_writes_dark_appearance_and_notification_defaults() {
+    fn ensure_default_config_file_writes_default_sections() {
         let dir = TempDir::new().expect("temp dir");
         let path = settings_path_in(dir.path());
 
@@ -496,6 +530,10 @@ mod tests {
         assert_eq!(
             parsed["notifications"]["sound"],
             Value::String("default".to_string())
+        );
+        assert_eq!(
+            parsed["clipboard"]["copy_selection_to_clipboard"],
+            Value::Bool(true)
         );
     }
 
@@ -589,6 +627,28 @@ mod tests {
         assert!(loaded.warnings.is_empty());
         assert!(!loaded.config.notifications.enabled);
         assert_eq!(loaded.config.notifications.sound, NotificationSound::Bell);
+    }
+
+    #[test]
+    fn load_from_path_reads_clipboard_preferences() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = settings_path_in(dir.path());
+        fs::create_dir_all(path.parent().expect("config dir")).expect("create config dir");
+        fs::write(
+            &path,
+            r#"{
+  "clipboard": {
+    "copy_selection_to_clipboard": false
+  }
+}
+"#,
+        )
+        .expect("write config");
+
+        let loaded = load_from_path(&path);
+
+        assert!(loaded.warnings.is_empty());
+        assert!(!loaded.config.clipboard.copy_selection_to_clipboard);
     }
 
     #[test]
@@ -688,6 +748,24 @@ mod tests {
         assert_eq!(
             parsed["notifications"]["sound"],
             Value::String("alert".to_string())
+        );
+    }
+
+    #[test]
+    fn save_to_path_writes_clipboard_preferences() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = settings_path_in(dir.path());
+        fs::create_dir_all(path.parent().expect("config dir")).expect("create config dir");
+
+        let mut config = AppConfig::default();
+        config.clipboard.copy_selection_to_clipboard = false;
+        save_to_path(&path, &config).expect("save clipboard");
+
+        let raw = fs::read_to_string(&path).expect("read config");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse config");
+        assert_eq!(
+            parsed["clipboard"]["copy_selection_to_clipboard"],
+            Value::Bool(false)
         );
     }
 
