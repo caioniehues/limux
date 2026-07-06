@@ -1,11 +1,11 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
-use crate::app_config::{AppConfig, ColorScheme, NotificationSound};
+use crate::app_config::{AppConfig, ColorScheme, NotificationSound, UiScale, DEFAULT_UI_SCALE};
 use crate::keybind_editor;
 use crate::shortcut_config::{NormalizedShortcut, ResolvedShortcutConfig, ShortcutId};
 
@@ -15,6 +15,101 @@ pub const SETTINGS_CSS: &str = r#"
     color: @window_fg_color;
 }
 "#;
+
+const MIN_UI_SCALE_PERCENT: f64 = 80.0;
+const MAX_UI_SCALE_PERCENT: f64 = 200.0;
+const UI_SCALE_STEP_PERCENT: f64 = 5.0;
+
+#[derive(Clone, Copy, Debug)]
+struct UiScaleDescriptor {
+    selector: &'static str,
+    property: &'static str,
+    base_size: f32,
+}
+
+const UI_SCALE_DESCRIPTORS: &[UiScaleDescriptor] = &[
+    UiScaleDescriptor {
+        selector: ".limux-ws-name",
+        property: "font-size",
+        base_size: 15.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-ws-star-btn",
+        property: "font-size",
+        base_size: 22.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-notify-dot, .limux-notify-dot-hidden",
+        property: "font-size",
+        base_size: 10.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-notify-msg, .limux-notify-msg-unread",
+        property: "font-size",
+        base_size: 11.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-sidebar-title",
+        property: "font-size",
+        base_size: 11.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-ws-path",
+        property: "font-size",
+        base_size: 12.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-tab",
+        property: "font-size",
+        base_size: 12.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-pin-icon",
+        property: "font-size",
+        base_size: 9.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-tab-rename-entry",
+        property: "font-size",
+        base_size: 12.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-browser-url-entry, .limux-browser-search-entry",
+        property: "font-size",
+        base_size: 12.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-keybind-hint, .limux-keybind-default, .limux-keybind-error, .limux-keybind-row-hint",
+        property: "font-size",
+        base_size: 12.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-pane-action image",
+        property: "-gtk-icon-size",
+        base_size: 16.0,
+    },
+    UiScaleDescriptor {
+        selector: ".limux-tab-close image",
+        property: "-gtk-icon-size",
+        base_size: 12.0,
+    },
+];
+
+pub fn ui_scale_css(config: &AppConfig) -> String {
+    let scale = config.appearance.ui_scale.get();
+    UI_SCALE_DESCRIPTORS
+        .iter()
+        .map(|descriptor| {
+            format!(
+                "{} {{ {}: {:.3}px; }}",
+                descriptor.selector,
+                descriptor.property,
+                descriptor.base_size * scale
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 type OnConfigChanged = dyn Fn(&AppConfig, &AppConfig);
 
@@ -172,6 +267,38 @@ fn build_general_page(input: &SettingsEditorInput) -> gtk::Widget {
     hover_row.set_activatable_widget(Some(&hover_switch));
     group.add(&hover_row);
 
+    let scale_row = adw::ActionRow::builder()
+        .title("Interface scale")
+        .subtitle("Scale Limux sidebar, pane header, and settings text")
+        .build();
+    scale_row.set_title_lines(1);
+    scale_row.set_subtitle_lines(2);
+    let scale = input.config.borrow().appearance.ui_scale.get();
+    let scale_adjustment = gtk::Adjustment::new(
+        f64::from(scale) * 100.0,
+        MIN_UI_SCALE_PERCENT,
+        MAX_UI_SCALE_PERCENT,
+        UI_SCALE_STEP_PERCENT,
+        UI_SCALE_STEP_PERCENT * 2.0,
+        0.0,
+    );
+    let scale_spin = gtk::SpinButton::builder()
+        .adjustment(&scale_adjustment)
+        .digits(0)
+        .numeric(true)
+        .valign(gtk::Align::Center)
+        .width_chars(4)
+        .build();
+    let scale_reset_button = gtk::Button::builder()
+        .label("Default")
+        .tooltip_text("Reset interface scale")
+        .valign(gtk::Align::Center)
+        .build();
+    scale_row.add_suffix(&scale_spin);
+    scale_row.add_suffix(&scale_reset_button);
+    scale_row.set_activatable_widget(Some(&scale_spin));
+    group.add(&scale_row);
+
     page.add(&group);
 
     {
@@ -210,6 +337,33 @@ fn build_general_page(input: &SettingsEditorInput) -> gtk::Widget {
             apply_config_change(&config, &*on_changed, move |c| {
                 c.focus.hover_terminal_focus = hover_terminal_focus;
             });
+        });
+    }
+    {
+        let config = input.config.clone();
+        let on_changed = input.on_config_changed.clone();
+        let updating_spin = Rc::new(Cell::new(false));
+        let updating_spin_for_reset = updating_spin.clone();
+        scale_spin.connect_value_changed(move |spin| {
+            if updating_spin.get() {
+                return;
+            }
+            let scale = UiScale::new((spin.value() / 100.0) as f32).unwrap_or_default();
+            apply_config_change(&config, &*on_changed, move |c| {
+                c.appearance.ui_scale = scale;
+            });
+        });
+
+        let config = input.config.clone();
+        let on_changed = input.on_config_changed.clone();
+        let scale_spin = scale_spin.clone();
+        scale_reset_button.connect_clicked(move |_| {
+            apply_config_change(&config, &*on_changed, move |c| {
+                c.appearance.ui_scale = UiScale::default();
+            });
+            updating_spin_for_reset.set(true);
+            scale_spin.set_value(f64::from(DEFAULT_UI_SCALE) * 100.0);
+            updating_spin_for_reset.set(false);
         });
     }
 
@@ -317,5 +471,17 @@ mod tests {
         );
 
         assert!(config.borrow().focus.hover_terminal_focus);
+    }
+
+    #[test]
+    fn ui_scale_css_scales_sidebar_and_pane_chrome() {
+        let mut config = AppConfig::default();
+        config.appearance.ui_scale = UiScale::new(1.5).expect("valid scale");
+
+        let css = ui_scale_css(&config);
+
+        assert!(css.contains(".limux-ws-name { font-size: 22.500px; }"));
+        assert!(css.contains(".limux-tab { font-size: 18.000px; }"));
+        assert!(css.contains(".limux-pane-action image { -gtk-icon-size: 24.000px; }"));
     }
 }

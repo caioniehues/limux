@@ -8,6 +8,9 @@ use serde_json::{json, Value};
 use crate::shortcut_config;
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
+pub const DEFAULT_UI_SCALE: f32 = 1.0;
+pub const MIN_UI_SCALE: f32 = 0.8;
+pub const MAX_UI_SCALE: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorScheme {
@@ -48,10 +51,36 @@ pub struct AppConfig {
     pub font_size: Option<f32>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppearanceConfig {
     pub color_scheme: ColorScheme,
     pub ghostty_color_scheme: ColorScheme,
+    pub ui_scale: UiScale,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiScale(f32);
+
+impl Default for UiScale {
+    fn default() -> Self {
+        Self(DEFAULT_UI_SCALE)
+    }
+}
+
+impl UiScale {
+    pub fn new(value: f32) -> Option<Self> {
+        value
+            .is_finite()
+            .then_some(Self(value.clamp(MIN_UI_SCALE, MAX_UI_SCALE)))
+    }
+
+    pub fn get(self) -> f32 {
+        self.0
+    }
+
+    pub fn is_default(self) -> bool {
+        (self.0 - DEFAULT_UI_SCALE).abs() < f32::EPSILON
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -238,6 +267,13 @@ fn parse_app_config_value(root: &Value) -> AppConfig {
         .and_then(ColorScheme::from_str)
         .unwrap_or(color_scheme);
 
+    let ui_scale = appearance
+        .and_then(|appearance| appearance.get("ui_scale"))
+        .and_then(Value::as_f64)
+        .map(|v| v as f32)
+        .and_then(UiScale::new)
+        .unwrap_or_default();
+
     let notifications = root.get("notifications").and_then(Value::as_object);
     let notification_defaults = NotificationConfig::default();
     let notifications_enabled = notifications
@@ -263,6 +299,7 @@ fn parse_app_config_value(root: &Value) -> AppConfig {
         appearance: AppearanceConfig {
             color_scheme,
             ghostty_color_scheme,
+            ui_scale,
         },
         notifications: NotificationConfig {
             enabled: notifications_enabled,
@@ -284,13 +321,22 @@ pub fn save(config: &AppConfig) -> Result<(), String> {
 fn save_to_path(path: &Path, config: &AppConfig) -> Result<(), String> {
     let mut root = read_existing_config_root_for_save(path)?;
 
-    root.insert(
-        "appearance".to_string(),
-        json!({
-            "color_scheme": config.appearance.color_scheme.as_str(),
-            "ghostty_color_scheme": config.appearance.ghostty_color_scheme.as_str(),
-        }),
+    let mut appearance = serde_json::Map::new();
+    appearance.insert(
+        "color_scheme".to_string(),
+        json!(config.appearance.color_scheme.as_str()),
     );
+    appearance.insert(
+        "ghostty_color_scheme".to_string(),
+        json!(config.appearance.ghostty_color_scheme.as_str()),
+    );
+    if !config.appearance.ui_scale.is_default() {
+        appearance.insert(
+            "ui_scale".to_string(),
+            json!(config.appearance.ui_scale.get()),
+        );
+    }
+    root.insert("appearance".to_string(), Value::Object(appearance));
     root.insert(
         "focus".to_string(),
         json!({ "hover_terminal_focus": config.focus.hover_terminal_focus }),
@@ -545,6 +591,29 @@ mod tests {
             loaded.config.appearance.ghostty_color_scheme,
             ColorScheme::Dark
         );
+        assert_eq!(loaded.config.appearance.ui_scale.get(), DEFAULT_UI_SCALE);
+    }
+
+    #[test]
+    fn load_from_path_reads_and_clamps_ui_scale() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = settings_path_in(dir.path());
+        fs::create_dir_all(path.parent().expect("config dir")).expect("create config dir");
+        fs::write(
+            &path,
+            r#"{
+  "appearance": {
+    "ui_scale": 3.0
+  }
+}
+"#,
+        )
+        .expect("write config");
+
+        let loaded = load_from_path(&path);
+
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(loaded.config.appearance.ui_scale.get(), MAX_UI_SCALE);
     }
 
     #[test]
@@ -613,6 +682,22 @@ mod tests {
             parsed["appearance"]["ghostty_color_scheme"],
             Value::String("dark".to_string())
         );
+        assert!(parsed["appearance"].get("ui_scale").is_none());
+    }
+
+    #[test]
+    fn save_to_path_writes_non_default_ui_scale() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = settings_path_in(dir.path());
+        fs::create_dir_all(path.parent().expect("config dir")).expect("create config dir");
+
+        let mut config = AppConfig::default();
+        config.appearance.ui_scale = UiScale::new(1.5).expect("valid scale");
+        save_to_path(&path, &config).expect("save config");
+
+        let raw = fs::read_to_string(&path).expect("read config");
+        let parsed: Value = serde_json::from_str(&raw).expect("parse config");
+        assert_eq!(parsed["appearance"]["ui_scale"], json!(1.5));
     }
 
     #[test]

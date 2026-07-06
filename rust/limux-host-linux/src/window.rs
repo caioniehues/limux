@@ -69,6 +69,7 @@ pub(crate) struct AppState {
     top_bar: Option<adw::HeaderBar>,
     top_bar_visible: bool,
     config: Rc<RefCell<app_config::AppConfig>>,
+    css_provider: gtk::CssProvider,
     system_prefers_dark: Rc<Cell<Option<bool>>>,
     workspaces: Vec<Workspace>,
     active_idx: usize,
@@ -1334,6 +1335,26 @@ row:selected .limux-ws-path {
 
 const CONTENT_BACKGROUND_RGB: (u8, u8, u8) = (23, 23, 23);
 
+fn app_css(background_opacity: f64, config: &app_config::AppConfig) -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        build_window_css(background_opacity),
+        pane::PANE_CSS,
+        keybind_editor::KEYBIND_EDITOR_CSS,
+        crate::settings_editor::SETTINGS_CSS,
+        crate::settings_editor::ui_scale_css(config),
+    )
+}
+
+fn reload_app_css(state: &State, config: &app_config::AppConfig) {
+    let background_opacity =
+        sanitize_background_opacity(crate::terminal::ghostty_background_opacity());
+    state
+        .borrow()
+        .css_provider
+        .load_from_data(&app_css(background_opacity, config));
+}
+
 // ---------------------------------------------------------------------------
 // Window construction
 // ---------------------------------------------------------------------------
@@ -1361,13 +1382,7 @@ pub fn build_window(app: &adw::Application) {
 
     // Load CSS
     let provider = gtk::CssProvider::new();
-    let all_css = format!(
-        "{}\n{}\n{}\n{}",
-        build_window_css(background_opacity),
-        pane::PANE_CSS,
-        keybind_editor::KEYBIND_EDITOR_CSS,
-        crate::settings_editor::SETTINGS_CSS,
-    );
+    let all_css = app_css(background_opacity, &config.borrow());
     provider.load_from_data(&all_css);
     gtk::style_context_add_provider_for_display(
         &display,
@@ -1539,6 +1554,7 @@ pub fn build_window(app: &adw::Application) {
         top_bar: header.clone(),
         top_bar_visible: true,
         config,
+        css_provider: provider.clone(),
         system_prefers_dark: system_prefers_dark.clone(),
         workspaces: Vec::new(),
         active_idx: 0,
@@ -4707,6 +4723,9 @@ pub(crate) fn create_pane_for_workspace(
                 let system_prefers_dark =
                     state_for_config_changed.borrow().system_prefers_dark.get();
                 apply_appearance(&style_manager, system_prefers_dark, &updated.appearance);
+                if updated.appearance.ui_scale != previous.appearance.ui_scale {
+                    reload_app_css(&state_for_config_changed, updated);
+                }
                 if let Err(err) = app_config::save(updated) {
                     state_for_config_changed
                         .borrow()
@@ -4714,6 +4733,9 @@ pub(crate) fn create_pane_for_workspace(
                         .borrow_mut()
                         .clone_from(previous);
                     apply_appearance(&style_manager, system_prefers_dark, &previous.appearance);
+                    if updated.appearance.ui_scale != previous.appearance.ui_scale {
+                        reload_app_css(&state_for_config_changed, previous);
+                    }
 
                     let detail = format!("Failed to save Limux settings: {err}");
                     eprintln!("limux: {detail}");
