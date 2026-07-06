@@ -3606,7 +3606,7 @@ mod tests {
         let defaults = default_shortcuts();
         assert_eq!(
             pane_action_tooltip(&defaults, "New terminal tab", Some(ShortcutId::NewTerminal)),
-            "New terminal tab (Ctrl+T)"
+            "New terminal tab (Ctrl+Alt+T)"
         );
         assert_eq!(
             pane_action_tooltip(&defaults, "New browser tab", None),

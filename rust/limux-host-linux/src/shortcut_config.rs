@@ -318,7 +318,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::NewWorkspace,
         config_key: "new_workspace",
         action_name: "win.new-workspace",
-        default_accel: "<Ctrl><Shift>n",
+        default_accel: "<Ctrl><Alt><Shift>n",
         label: "New Workspace",
         registers_gtk_accel: true,
         command: ShortcutCommand::NewWorkspace,
@@ -340,7 +340,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::QuitApp,
         config_key: "quit_app",
         action_name: "app.quit",
-        default_accel: "<Ctrl>q",
+        default_accel: "<Ctrl><Alt>q",
         label: "Quit Limux",
         registers_gtk_accel: true,
         command: ShortcutCommand::QuitApp,
@@ -362,7 +362,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ToggleSidebar,
         config_key: "toggle_sidebar",
         action_name: "win.toggle-sidebar",
-        default_accel: "<Ctrl>m",
+        default_accel: "<Ctrl><Alt>m",
         label: "Toggle Sidebar",
         registers_gtk_accel: true,
         command: ShortcutCommand::ToggleSidebar,
@@ -373,7 +373,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ToggleTopBar,
         config_key: "toggle_top_bar",
         action_name: "win.toggle-top-bar",
-        default_accel: "<Ctrl><Shift>m",
+        default_accel: "<Ctrl><Alt><Shift>m",
         label: "Toggle Top Bar",
         registers_gtk_accel: true,
         command: ShortcutCommand::ToggleTopBar,
@@ -395,7 +395,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::NextWorkspace,
         config_key: "next_workspace",
         action_name: "win.next-workspace",
-        default_accel: "<Ctrl>Page_Down",
+        default_accel: "<Ctrl><Alt>Page_Down",
         label: "Next Workspace",
         registers_gtk_accel: true,
         command: ShortcutCommand::NextWorkspace,
@@ -406,7 +406,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::PrevWorkspace,
         config_key: "prev_workspace",
         action_name: "win.prev-workspace",
-        default_accel: "<Ctrl>Page_Up",
+        default_accel: "<Ctrl><Alt>Page_Up",
         label: "Previous Workspace",
         registers_gtk_accel: true,
         command: ShortcutCommand::PrevWorkspace,
@@ -417,7 +417,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::CycleTabPrev,
         config_key: "cycle_tab_prev",
         action_name: "win.cycle-tab-prev",
-        default_accel: "<Ctrl><Shift>Left",
+        default_accel: "<Ctrl><Alt><Shift>Left",
         label: "Previous Tab",
         registers_gtk_accel: false,
         command: ShortcutCommand::CycleTabPrev,
@@ -428,7 +428,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::CycleTabNext,
         config_key: "cycle_tab_next",
         action_name: "win.cycle-tab-next",
-        default_accel: "<Ctrl><Shift>Right",
+        default_accel: "<Ctrl><Alt><Shift>Right",
         label: "Next Tab",
         registers_gtk_accel: false,
         command: ShortcutCommand::CycleTabNext,
@@ -439,7 +439,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SplitDown,
         config_key: "split_down",
         action_name: "win.split-down",
-        default_accel: "<Ctrl><Shift>d",
+        default_accel: "<Ctrl><Alt><Shift>d",
         label: "Split Down",
         registers_gtk_accel: false,
         command: ShortcutCommand::SplitDown,
@@ -461,7 +461,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SplitRight,
         config_key: "split_right",
         action_name: "win.split-right",
-        default_accel: "<Ctrl>d",
+        default_accel: "<Ctrl><Alt>d",
         label: "Split Right",
         registers_gtk_accel: false,
         command: ShortcutCommand::SplitRight,
@@ -505,7 +505,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::NewTerminal,
         config_key: "new_terminal",
         action_name: "win.new-terminal",
-        default_accel: "<Ctrl>t",
+        default_accel: "<Ctrl><Alt>t",
         label: "New Terminal",
         registers_gtk_accel: false,
         command: ShortcutCommand::NewTerminal,
@@ -516,7 +516,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::FocusLeft,
         config_key: "focus_left",
         action_name: "win.focus-left",
-        default_accel: "<Ctrl>Left",
+        default_accel: "<Ctrl><Alt>Left",
         label: "Focus Left",
         registers_gtk_accel: false,
         command: ShortcutCommand::FocusLeft,
@@ -527,7 +527,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::FocusRight,
         config_key: "focus_right",
         action_name: "win.focus-right",
-        default_accel: "<Ctrl>Right",
+        default_accel: "<Ctrl><Alt>Right",
         label: "Focus Right",
         registers_gtk_accel: false,
         command: ShortcutCommand::FocusRight,
@@ -538,7 +538,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::FocusUp,
         config_key: "focus_up",
         action_name: "win.focus-up",
-        default_accel: "<Ctrl>Up",
+        default_accel: "<Ctrl><Alt>Up",
         label: "Focus Up",
         registers_gtk_accel: false,
         command: ShortcutCommand::FocusUp,
@@ -549,7 +549,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::FocusDown,
         config_key: "focus_down",
         action_name: "win.focus-down",
-        default_accel: "<Ctrl>Down",
+        default_accel: "<Ctrl><Alt>Down",
         label: "Focus Down",
         registers_gtk_accel: false,
         command: ShortcutCommand::FocusDown,
@@ -560,7 +560,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace1,
         config_key: "activate_workspace_1",
         action_name: "win.activate-workspace-1",
-        default_accel: "<Ctrl>1",
+        default_accel: "<Ctrl><Alt>1",
         label: "Activate Workspace 1",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace1,
@@ -571,7 +571,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace2,
         config_key: "activate_workspace_2",
         action_name: "win.activate-workspace-2",
-        default_accel: "<Ctrl>2",
+        default_accel: "<Ctrl><Alt>2",
         label: "Activate Workspace 2",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace2,
@@ -582,7 +582,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace3,
         config_key: "activate_workspace_3",
         action_name: "win.activate-workspace-3",
-        default_accel: "<Ctrl>3",
+        default_accel: "<Ctrl><Alt>3",
         label: "Activate Workspace 3",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace3,
@@ -593,7 +593,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace4,
         config_key: "activate_workspace_4",
         action_name: "win.activate-workspace-4",
-        default_accel: "<Ctrl>4",
+        default_accel: "<Ctrl><Alt>4",
         label: "Activate Workspace 4",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace4,
@@ -604,7 +604,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace5,
         config_key: "activate_workspace_5",
         action_name: "win.activate-workspace-5",
-        default_accel: "<Ctrl>5",
+        default_accel: "<Ctrl><Alt>5",
         label: "Activate Workspace 5",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace5,
@@ -615,7 +615,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace6,
         config_key: "activate_workspace_6",
         action_name: "win.activate-workspace-6",
-        default_accel: "<Ctrl>6",
+        default_accel: "<Ctrl><Alt>6",
         label: "Activate Workspace 6",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace6,
@@ -626,7 +626,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace7,
         config_key: "activate_workspace_7",
         action_name: "win.activate-workspace-7",
-        default_accel: "<Ctrl>7",
+        default_accel: "<Ctrl><Alt>7",
         label: "Activate Workspace 7",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace7,
@@ -637,7 +637,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateWorkspace8,
         config_key: "activate_workspace_8",
         action_name: "win.activate-workspace-8",
-        default_accel: "<Ctrl>8",
+        default_accel: "<Ctrl><Alt>8",
         label: "Activate Workspace 8",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateWorkspace8,
@@ -648,7 +648,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::ActivateLastWorkspace,
         config_key: "activate_last_workspace",
         action_name: "win.activate-last-workspace",
-        default_accel: "<Ctrl>9",
+        default_accel: "<Ctrl><Alt>9",
         label: "Activate Last Workspace",
         registers_gtk_accel: false,
         command: ShortcutCommand::ActivateLastWorkspace,
@@ -736,7 +736,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SurfaceFind,
         config_key: "surface_find",
         action_name: "win.surface-find",
-        default_accel: "<Ctrl>f",
+        default_accel: "<Ctrl><Alt>f",
         label: "Find",
         registers_gtk_accel: false,
         command: ShortcutCommand::SurfaceFind,
@@ -747,7 +747,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SurfaceFindNext,
         config_key: "surface_find_next",
         action_name: "win.surface-find-next",
-        default_accel: "<Ctrl>g",
+        default_accel: "<Ctrl><Alt>g",
         label: "Find Next",
         registers_gtk_accel: false,
         command: ShortcutCommand::SurfaceFindNext,
@@ -758,7 +758,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SurfaceFindPrevious,
         config_key: "surface_find_previous",
         action_name: "win.surface-find-previous",
-        default_accel: "<Ctrl><Shift>g",
+        default_accel: "<Ctrl><Alt><Shift>g",
         label: "Find Previous",
         registers_gtk_accel: false,
         command: ShortcutCommand::SurfaceFindPrevious,
@@ -769,7 +769,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SurfaceFindHide,
         config_key: "surface_find_hide",
         action_name: "win.surface-find-hide",
-        default_accel: "<Ctrl><Shift>f",
+        default_accel: "<Ctrl><Alt><Shift>f",
         label: "Hide Find",
         registers_gtk_accel: false,
         command: ShortcutCommand::SurfaceFindHide,
@@ -780,7 +780,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::SurfaceUseSelectionForFind,
         config_key: "surface_use_selection_for_find",
         action_name: "win.surface-use-selection-for-find",
-        default_accel: "<Ctrl>e",
+        default_accel: "<Ctrl><Alt>e",
         label: "Use Selection For Find",
         registers_gtk_accel: false,
         command: ShortcutCommand::SurfaceUseSelectionForFind,
@@ -791,7 +791,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::TerminalClearScrollback,
         config_key: "terminal_clear_scrollback",
         action_name: "win.terminal-clear-scrollback",
-        default_accel: "<Ctrl>k",
+        default_accel: "<Ctrl><Alt>k",
         label: "Terminal Clear Scrollback",
         registers_gtk_accel: false,
         command: ShortcutCommand::TerminalClearScrollback,
@@ -824,7 +824,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::TerminalIncreaseFontSize,
         config_key: "terminal_increase_font_size",
         action_name: "win.terminal-increase-font-size",
-        default_accel: "<Ctrl>equal",
+        default_accel: "<Ctrl><Alt>equal",
         label: "Terminal Increase Font Size",
         registers_gtk_accel: false,
         command: ShortcutCommand::TerminalIncreaseFontSize,
@@ -835,7 +835,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::TerminalDecreaseFontSize,
         config_key: "terminal_decrease_font_size",
         action_name: "win.terminal-decrease-font-size",
-        default_accel: "<Ctrl>minus",
+        default_accel: "<Ctrl><Alt>minus",
         label: "Terminal Decrease Font Size",
         registers_gtk_accel: false,
         command: ShortcutCommand::TerminalDecreaseFontSize,
@@ -846,7 +846,7 @@ const SHORTCUT_DEFINITIONS: [ShortcutDefinition; 49] = [
         id: ShortcutId::TerminalResetFontSize,
         config_key: "terminal_reset_font_size",
         action_name: "win.terminal-reset-font-size",
-        default_accel: "<Ctrl><Shift>0",
+        default_accel: "<Ctrl><Alt><Shift>0",
         label: "Terminal Reset Font Size",
         registers_gtk_accel: false,
         command: ShortcutCommand::TerminalResetFontSize,
@@ -1939,7 +1939,7 @@ mod tests {
                 "shortcuts": {
                     "split_right": "<Ctrl>h",
                     "close_focused_pane": null,
-                    "toggle_sidebar": "<Ctrl>m"
+                    "toggle_sidebar": "<Ctrl><Alt>m"
                 }
             }"#,
         )
@@ -2170,7 +2170,7 @@ mod tests {
             .find(|(action, _)| *action == "app.quit")
             .map(|(_, accels)| accels)
             .unwrap();
-        assert_eq!(app_quit, vec!["<Ctrl>q".to_string()]);
+        assert_eq!(app_quit, vec!["<Ctrl><Alt>q".to_string()]);
 
         let remapped = resolve_shortcuts_from_str(
             r#"{
@@ -2197,9 +2197,10 @@ mod tests {
         let resolved = default_shortcuts();
 
         assert_eq!(
-            resolved.command_for_runtime_combo("ctrl+t"),
+            resolved.command_for_runtime_combo("ctrl+alt+t"),
             Some(ShortcutCommand::NewTerminal)
         );
+        assert_eq!(resolved.command_for_runtime_combo("ctrl+t"), None);
         assert_eq!(resolved.command_for_runtime_combo("ctrl+c"), None);
         assert_eq!(
             resolved.command_for_runtime_combo("ctrl+shift+c"),
@@ -2218,8 +2219,9 @@ mod tests {
             resolved.command_for_runtime_combo("ctrl+alt+w"),
             Some(ShortcutCommand::CloseFocusedPane)
         );
+        assert_eq!(resolved.command_for_runtime_combo("ctrl+9"), None);
         assert_eq!(
-            resolved.command_for_runtime_combo("ctrl+9"),
+            resolved.command_for_runtime_combo("ctrl+alt+9"),
             Some(ShortcutCommand::ActivateLastWorkspace)
         );
     }
@@ -2232,14 +2234,14 @@ mod tests {
             resolved
                 .default_display_label_for_id(ShortcutId::SplitRight)
                 .as_deref(),
-            Some("Ctrl+D")
+            Some("Ctrl+Alt+D")
         );
         assert_eq!(
             resolved
                 .find_by_id(ShortcutId::SplitRight)
                 .map(ResolvedShortcut::default_display_label)
                 .as_deref(),
-            Some("Ctrl+D")
+            Some("Ctrl+Alt+D")
         );
         assert_eq!(
             resolved
@@ -2368,7 +2370,7 @@ mod tests {
         let defaults = default_shortcuts();
         assert_eq!(
             defaults.tooltip_text(ShortcutId::ToggleSidebar, "Toggle Sidebar"),
-            "Toggle Sidebar (Ctrl+M)"
+            "Toggle Sidebar (Ctrl+Alt+M)"
         );
 
         let remapped = resolve_shortcuts_from_str(
@@ -2496,7 +2498,7 @@ mod tests {
             r#"{
                 "theme": "nord",
                 "shortcuts": {
-                    "split_right": "<Ctrl>d"
+                    "split_right": "<Ctrl><Alt>d"
                 }
             }"#,
         )

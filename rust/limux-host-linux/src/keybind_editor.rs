@@ -423,7 +423,7 @@ mod tests {
         let defaults = default_shortcuts();
         assert_eq!(
             binding_button_label(&defaults, ShortcutId::SplitRight, false),
-            "Ctrl+D"
+            "Ctrl+Alt+D"
         );
         assert_eq!(
             binding_button_label(&defaults, ShortcutId::SplitRight, true),

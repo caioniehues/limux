@@ -6409,6 +6409,14 @@ mod tests {
                 gdk::Key::T,
                 gdk::ModifierType::CONTROL_MASK
             ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::T,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
+            ),
             Some(ShortcutCommand::NewTerminal)
         );
         assert_eq!(
@@ -6417,6 +6425,14 @@ mod tests {
                 gdk::Key::Page_Down,
                 gdk::ModifierType::CONTROL_MASK
             ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::Page_Down,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
+            ),
             Some(ShortcutCommand::NextWorkspace)
         );
         assert_eq!(
@@ -6424,6 +6440,14 @@ mod tests {
                 &shortcuts,
                 gdk::Key::F,
                 gdk::ModifierType::CONTROL_MASK
+            ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::F,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
             ),
             Some(ShortcutCommand::SurfaceFind)
         );
@@ -6473,6 +6497,14 @@ mod tests {
                 gdk::Key::Q,
                 gdk::ModifierType::CONTROL_MASK
             ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::Q,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
+            ),
             Some(ShortcutCommand::QuitApp)
         );
         assert_eq!(
@@ -6493,6 +6525,14 @@ mod tests {
                 gdk::Key::M,
                 gdk::ModifierType::CONTROL_MASK
             ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::M,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK
+            ),
             Some(ShortcutCommand::ToggleSidebar)
         );
         assert_eq!(
@@ -6500,6 +6540,16 @@ mod tests {
                 &shortcuts,
                 gdk::Key::M,
                 gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK
+            ),
+            None
+        );
+        assert_eq!(
+            shortcut_command_from_key_event(
+                &shortcuts,
+                gdk::Key::M,
+                gdk::ModifierType::CONTROL_MASK
+                    | gdk::ModifierType::ALT_MASK
+                    | gdk::ModifierType::SHIFT_MASK
             ),
             Some(ShortcutCommand::ToggleTopBar)
         );

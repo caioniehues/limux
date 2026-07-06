@@ -92,7 +92,7 @@ Rules:
 
 - Keys must be under `"shortcuts"`.
 - Values must be either:
-  - a GTK-style accelerator string like `"<Ctrl><Shift>n"`
+  - a GTK-style accelerator string like `"<Ctrl><Alt><Shift>n"`
   - `null` to unbind
   - `""` to unbind
 - Omitted keys keep their defaults.
@@ -103,37 +103,37 @@ These are the current supported config keys and defaults:
 
 | Config key | Default |
 |---|---|
-| `new_workspace` | `<Ctrl><Shift>n` |
+| `new_workspace` | `<Ctrl><Alt><Shift>n` |
 | `close_workspace` | `<Ctrl><Alt><Shift>w` |
-| `quit_app` | `<Ctrl>q` |
+| `quit_app` | `<Ctrl><Alt>q` |
 | `new_instance` | `<Ctrl><Alt>n` |
-| `toggle_sidebar` | `<Ctrl>m` |
-| `toggle_top_bar` | `<Ctrl><Shift>m` |
+| `toggle_sidebar` | `<Ctrl><Alt>m` |
+| `toggle_top_bar` | `<Ctrl><Alt><Shift>m` |
 | `toggle_fullscreen` | `F11` |
-| `next_workspace` | `<Ctrl>Page_Down` |
-| `prev_workspace` | `<Ctrl>Page_Up` |
-| `cycle_tab_prev` | `<Ctrl><Shift>Left` |
-| `cycle_tab_next` | `<Ctrl><Shift>Right` |
-| `split_down` | `<Ctrl><Shift>d` |
+| `next_workspace` | `<Ctrl><Alt>Page_Down` |
+| `prev_workspace` | `<Ctrl><Alt>Page_Up` |
+| `cycle_tab_prev` | `<Ctrl><Alt><Shift>Left` |
+| `cycle_tab_next` | `<Ctrl><Alt><Shift>Right` |
+| `split_down` | `<Ctrl><Alt><Shift>d` |
 | `new_terminal_in_focused_pane` | `<Ctrl><Shift>t` |
-| `split_right` | `<Ctrl>d` |
+| `split_right` | `<Ctrl><Alt>d` |
 | `close_focused_pane` | `<Ctrl><Alt>w` |
 | `close_focused_tab` | `<Ctrl><Shift>w` |
 | `toggle_focused_pane_zoom` | `<Ctrl><Shift>z` |
-| `new_terminal` | `<Ctrl>t` |
-| `focus_left` | `<Ctrl>Left` |
-| `focus_right` | `<Ctrl>Right` |
-| `focus_up` | `<Ctrl>Up` |
-| `focus_down` | `<Ctrl>Down` |
-| `activate_workspace_1` | `<Ctrl>1` |
-| `activate_workspace_2` | `<Ctrl>2` |
-| `activate_workspace_3` | `<Ctrl>3` |
-| `activate_workspace_4` | `<Ctrl>4` |
-| `activate_workspace_5` | `<Ctrl>5` |
-| `activate_workspace_6` | `<Ctrl>6` |
-| `activate_workspace_7` | `<Ctrl>7` |
-| `activate_workspace_8` | `<Ctrl>8` |
-| `activate_last_workspace` | `<Ctrl>9` |
+| `new_terminal` | `<Ctrl><Alt>t` |
+| `focus_left` | `<Ctrl><Alt>Left` |
+| `focus_right` | `<Ctrl><Alt>Right` |
+| `focus_up` | `<Ctrl><Alt>Up` |
+| `focus_down` | `<Ctrl><Alt>Down` |
+| `activate_workspace_1` | `<Ctrl><Alt>1` |
+| `activate_workspace_2` | `<Ctrl><Alt>2` |
+| `activate_workspace_3` | `<Ctrl><Alt>3` |
+| `activate_workspace_4` | `<Ctrl><Alt>4` |
+| `activate_workspace_5` | `<Ctrl><Alt>5` |
+| `activate_workspace_6` | `<Ctrl><Alt>6` |
+| `activate_workspace_7` | `<Ctrl><Alt>7` |
+| `activate_workspace_8` | `<Ctrl><Alt>8` |
+| `activate_last_workspace` | `<Ctrl><Alt>9` |
 | `open_browser_in_split` | `<Ctrl><Shift>l` |
 | `browser_focus_location` | `<Ctrl>l` |
 | `browser_back` | `<Ctrl>bracketleft` |
@@ -141,17 +141,17 @@ These are the current supported config keys and defaults:
 | `browser_reload` | `<Ctrl>r` |
 | `browser_inspector` | `<Ctrl><Alt>i` |
 | `browser_console` | `<Ctrl><Alt>c` |
-| `surface_find` | `<Ctrl>f` |
-| `surface_find_next` | `<Ctrl>g` |
-| `surface_find_previous` | `<Ctrl><Shift>g` |
-| `surface_find_hide` | `<Ctrl><Shift>f` |
-| `surface_use_selection_for_find` | `<Ctrl>e` |
-| `terminal_clear_scrollback` | `<Ctrl>k` |
+| `surface_find` | `<Ctrl><Alt>f` |
+| `surface_find_next` | `<Ctrl><Alt>g` |
+| `surface_find_previous` | `<Ctrl><Alt><Shift>g` |
+| `surface_find_hide` | `<Ctrl><Alt><Shift>f` |
+| `surface_use_selection_for_find` | `<Ctrl><Alt>e` |
+| `terminal_clear_scrollback` | `<Ctrl><Alt>k` |
 | `terminal_copy` | `<Ctrl><Shift>c` |
 | `terminal_paste` | `<Ctrl><Shift>v` |
-| `terminal_increase_font_size` | `<Ctrl>plus` |
-| `terminal_decrease_font_size` | `<Ctrl>minus` |
-| `terminal_reset_font_size` | `<Ctrl><Shift>0` |
+| `terminal_increase_font_size` | `<Ctrl><Alt>plus` |
+| `terminal_decrease_font_size` | `<Ctrl><Alt>minus` |
+| `terminal_reset_font_size` | `<Ctrl><Alt><Shift>0` |
 
 ## Dispatch Model
 
@@ -251,21 +251,21 @@ trash ~/.config/limux/shortcuts.json
 
 Launch Limux and verify:
 
-- `Ctrl+M` toggles the sidebar
-- `Ctrl+Shift+M` toggles the top bar
+- `Ctrl+Alt+M` toggles the sidebar
+- `Ctrl+Alt+Shift+M` toggles the top bar
 - `F11` toggles fullscreen
-- `Ctrl+T` opens a terminal tab
-- `Ctrl+D` splits right
-- `Ctrl+Shift+D` splits down
+- `Ctrl+Alt+T` opens a terminal tab
+- `Ctrl+Alt+D` splits right
+- `Ctrl+Alt+Shift+D` splits down
 - `Ctrl+W` reaches the focused terminal
 - `Ctrl+Shift+W` closes the focused tab
 - `Ctrl+Alt+W` closes the focused pane
-- `Ctrl+Page_Down` and `Ctrl+Page_Up` switch workspaces
+- `Ctrl+Alt+Page_Down` and `Ctrl+Alt+Page_Up` switch workspaces
 - pane button tooltips show the default shortcut suffixes where applicable
-- `Ctrl+Q` quits Limux
+- `Ctrl+Alt+Q` quits Limux
 - `Ctrl+Alt+N` opens a second Limux instance
-- `Ctrl+K` clears terminal scrollback
-- `Ctrl+Shift+0` resets terminal font size
+- `Ctrl+Alt+K` clears terminal scrollback
+- `Ctrl+Alt+Shift+0` resets terminal font size
 
 ### 2. Remap One Shortcut
 
@@ -282,7 +282,7 @@ Create:
 Restart Limux and verify:
 
 - `Ctrl+Alt+B` toggles the sidebar
-- `Ctrl+M` no longer toggles the sidebar
+- `Ctrl+Alt+M` no longer toggles the sidebar
 
 ### 3. Unbind One Shortcut
 
@@ -298,9 +298,9 @@ Create:
 
 Restart Limux and verify:
 
-- `Ctrl+D` no longer triggers split-right in Limux
+- `Ctrl+Alt+D` no longer triggers split-right in Limux
 - the split-right button tooltip no longer shows a shortcut suffix
-- in a terminal pane, `Ctrl+D` now reaches the terminal app instead of being intercepted by Limux
+- in a terminal pane, `Ctrl+D` reaches the terminal app because it is not a default Limux shortcut
 
 ### 4. Verify Pane Tooltip Remap
 
@@ -309,7 +309,7 @@ Create:
 ```json
 {
   "shortcuts": {
-    "new_terminal": "<Ctrl><Alt>t",
+    "new_terminal": "<Ctrl><Alt>y",
     "close_focused_pane": "<Ctrl><Alt><BackSpace>"
   }
 }
@@ -317,9 +317,9 @@ Create:
 
 Restart Limux and verify:
 
-- pane button tooltips show `Ctrl+Alt+T` and `Ctrl+Alt+BackSpace`
-- `Ctrl+Alt+T` opens a terminal tab
-- `Ctrl+T` no longer opens a terminal tab
+- pane button tooltips show `Ctrl+Alt+Y` and `Ctrl+Alt+BackSpace`
+- `Ctrl+Alt+Y` opens a terminal tab
+- `Ctrl+Alt+T` no longer opens a terminal tab
 - `Ctrl+Alt+BackSpace` closes the focused pane
 - `Ctrl+Alt+W` no longer closes the pane
 
@@ -340,8 +340,8 @@ Restart Limux from a terminal and verify:
 
 - Limux prints a warning about duplicate bindings
 - Limux falls back to defaults
-- `Ctrl+M` toggles the sidebar
-- `Ctrl+D` still splits right
+- `Ctrl+Alt+M` toggles the sidebar
+- `Ctrl+Alt+D` still splits right
 
 ### 6. Open The Keybinds Editor
 
@@ -363,7 +363,7 @@ Verify:
 - the `Split Right` row updates to `Ctrl+H`
 - `~/.config/limux/shortcuts.json` contains the `split_right` override
 - `Ctrl+H` splits right immediately without restarting Limux
-- `Ctrl+D` no longer splits right
+- `Ctrl+Alt+D` no longer splits right
 - the pane header split-right tooltip now shows `Ctrl+H`
 
 ### 8. Editor Validation
@@ -443,18 +443,18 @@ Launch a browser tab and verify:
 
 Verify with a terminal tab focused:
 
-- `Ctrl+F` opens terminal search
-- `Ctrl+G` and `Ctrl+Shift+G` move through terminal search results
-- `Ctrl+E` uses the current terminal selection for search
-- `Ctrl+K`, `Ctrl+Shift+C`, `Ctrl+Shift+V`, `Ctrl++`, `Ctrl+-`, and `Ctrl+Shift+0` affect only the terminal
+- `Ctrl+Alt+F` opens terminal search
+- `Ctrl+Alt+G` and `Ctrl+Alt+Shift+G` move through terminal search results
+- `Ctrl+Alt+E` uses the current terminal selection for search
+- `Ctrl+Alt+K`, `Ctrl+Shift+C`, `Ctrl+Shift+V`, `Ctrl+Alt++`, `Ctrl+Alt+-`, and `Ctrl+Alt+Shift+0` affect only the terminal
 
 Verify with a browser tab focused:
 
-- `Ctrl+F` opens the browser find bar
-- `Ctrl+G` and `Ctrl+Shift+G` move through browser find results
-- `Ctrl+Shift+F` hides the browser find bar and returns focus to the page
-- `Ctrl+E` seeds browser find from the current DOM selection when page text is selected
-- terminal shortcuts like `Ctrl+K` do not fire on the browser
+- `Ctrl+Alt+F` opens the browser find bar
+- `Ctrl+Alt+G` and `Ctrl+Alt+Shift+G` move through browser find results
+- `Ctrl+Alt+Shift+F` hides the browser find bar and returns focus to the page
+- `Ctrl+Alt+E` seeds browser find from the current DOM selection when page text is selected
+- terminal shortcuts like `Ctrl+Alt+K` do not fire on the browser
 
 ### 14. Browser Navigation And Devtools
 
@@ -473,7 +473,7 @@ If you only want a short smoke test, do these three:
 
 1. Remap `toggle_sidebar` to `<Ctrl><Alt>b`
 2. Unbind `split_right`
-3. Remap `new_terminal` to `<Ctrl><Alt>t`
+3. Remap `new_terminal` to `<Ctrl><Alt>y`
 
 That covers:
 

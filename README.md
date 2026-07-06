@@ -171,13 +171,13 @@ loop, crate map, and the `feat/cmux-parity` roadmap tracked in
 
 ## Keyboard shortcuts
 
-Most default shortcuts use `Ctrl`. Fullscreen defaults to `F11`. Custom remaps may also use `Cmd`, which Limux maps to either the Linux `Meta` or `Super` modifier. `Opt` maps to `Alt`.
+Most host-owned defaults use `Ctrl+Alt` so plain terminal `Ctrl` editing keys pass through. Fullscreen defaults to `F11`. Custom remaps may also use `Cmd`, which Limux maps to either the Linux `Meta` or `Super` modifier. `Opt` maps to `Alt`.
 
 ### App
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Q` | Quit Limux |
+| `Ctrl+Alt+Q` | Quit Limux |
 | `Ctrl+Alt+N` | Open a new Limux instance |
 | `F11` | Toggle fullscreen |
 
@@ -197,42 +197,42 @@ Most default shortcuts use `Ctrl`. Fullscreen defaults to `F11`. Custom remaps m
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+F` | Open find on the focused terminal or browser |
-| `Ctrl+G` | Find next |
-| `Ctrl+Shift+G` | Find previous |
-| `Ctrl+Shift+F` | Hide find |
-| `Ctrl+E` | Use selection for find |
+| `Ctrl+Alt+F` | Open find on the focused terminal or browser |
+| `Ctrl+Alt+G` | Find next |
+| `Ctrl+Alt+Shift+G` | Find previous |
+| `Ctrl+Alt+Shift+F` | Hide find |
+| `Ctrl+Alt+E` | Use selection for find |
 
 ### Terminal
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+K` | Clear scrollback |
+| `Ctrl+Alt+K` | Clear scrollback |
 | `Ctrl+Shift+C` | Copy selection |
 | `Ctrl+Shift+V` | Paste |
-| `Ctrl++` | Increase font size |
-| `Ctrl+-` | Decrease font size |
-| `Ctrl+Shift+0` | Reset font size |
+| `Ctrl+Alt++` | Increase font size |
+| `Ctrl+Alt+-` | Decrease font size |
+| `Ctrl+Alt+Shift+0` | Reset font size |
 
 ### Workspace And Pane
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+N` | New workspace (folder picker) |
+| `Ctrl+Alt+Shift+N` | New workspace (folder picker) |
 | `Ctrl+Alt+Shift+W` | Close workspace |
-| `Ctrl+Shift+Left/Right` | Cycle tabs in focused pane |
-| `Ctrl+Shift+D` | Split down |
+| `Ctrl+Alt+Shift+Left/Right` | Cycle tabs in focused pane |
+| `Ctrl+Alt+Shift+D` | Split down |
 | `Ctrl+Shift+T` | New terminal tab in the focused pane |
-| `Ctrl+D` | Split right |
+| `Ctrl+Alt+D` | Split right |
 | `Ctrl+Shift+W` | Close focused tab |
 | `Ctrl+Alt+W` | Close focused pane |
 | `Ctrl+Shift+Z` | Toggle focused pane zoom |
-| `Ctrl+M` | Toggle sidebar |
-| `Ctrl+Shift+M` | Toggle top bar |
-| `Ctrl+T` | New terminal tab |
-| `Ctrl+Arrow` | Focus pane in direction |
-| `Ctrl+PageDown/Up` | Next or previous workspace |
-| `Ctrl+1-9` | Switch to workspace by number |
+| `Ctrl+Alt+M` | Toggle sidebar |
+| `Ctrl+Alt+Shift+M` | Toggle top bar |
+| `Ctrl+Alt+T` | New terminal tab |
+| `Ctrl+Alt+Arrow` | Focus pane in direction |
+| `Ctrl+Alt+PageDown/Up` | Next or previous workspace |
+| `Ctrl+Alt+1-9` | Switch to workspace by number |
 
 ## Architecture
 
