@@ -1230,6 +1230,7 @@ fn add_terminal_tab_inner(
     extra_env.push(("LIMUX_SURFACE_ID".to_string(), surface_id_for_env));
     extra_env.push(("LIMUX_PANE_ID".to_string(), internals.pane_id.to_string()));
     extra_env.push(("LIMUX_TAB_ID".to_string(), tab_id.clone()));
+    extra_env.extend(crate::terminal_child_environment_overrides());
     if let Some(sock) = limux_control::socket_path::resolve_socket_path(
         None,
         limux_control::socket_path::SocketMode::Runtime,

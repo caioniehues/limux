@@ -8,3 +8,4 @@ cd "$ROOT_DIR"
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+./scripts/tests/test-package-svg-loader.sh

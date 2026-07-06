@@ -11,8 +11,8 @@ PACKAGE_SH="$SCRIPT_DIR/../package.sh"
 PASS=0
 FAIL=0
 
-pass() { PASS=$((PASS+1)); printf '  ✓ %s\n' "$1"; }
-fail() { FAIL=$((FAIL+1)); printf '  ✗ %s\n    %s\n' "$1" "$2"; }
+pass() { PASS=$((PASS+1)); printf '  PASS %s\n' "$1"; }
+fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n    %s\n' "$1" "$2"; }
 
 # ----- T1: PIXBUF_MULTIARCH mapping per uname -m -----
 
@@ -41,7 +41,7 @@ do
     expected="${input##*:}"
     actual="$(multiarch_for "$arch")"
     if [ "$actual" = "$expected" ]; then
-        pass "uname -m=$arch → $expected"
+        pass "uname -m=$arch -> $expected"
     else
         fail "uname -m=$arch" "expected '$expected', got '$actual'"
     fi
@@ -133,9 +133,63 @@ else
     fail "skip export on read-only HOME" "expected NOT_SET, got: $result"
 fi
 
-# ----- T4: LIMUX_REQUIRE_SVG_LOADER hard-fail vs warn-only -----
+# ----- T4: AppRun preserves original loader environment for terminal children -----
 
-echo "T4: LIMUX_REQUIRE_SVG_LOADER gates exit 1"
+echo "T4: AppRun original environment markers"
+
+run_apprun_preserve_block() {
+    LD_LIBRARY_PATH="${1-}" \
+    GDK_PIXBUF_MODULE_FILE="${2-}" \
+    WEBKIT_EXEC_PATH="${3-}" \
+    WEBKIT_INJECTED_BUNDLE_PATH="${4-}" \
+    bash -c '
+        if [ "${LD_LIBRARY_PATH+x}" = x ]; then
+            export LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET=1
+            export LIMUX_ORIGINAL_LD_LIBRARY_PATH="${LD_LIBRARY_PATH}"
+        else
+            export LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET=0
+            export LIMUX_ORIGINAL_LD_LIBRARY_PATH=""
+        fi
+        if [ "${GDK_PIXBUF_MODULE_FILE+x}" = x ]; then
+            export LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET=1
+            export LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE="${GDK_PIXBUF_MODULE_FILE}"
+        else
+            export LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET=0
+            export LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE=""
+        fi
+        if [ "${WEBKIT_EXEC_PATH+x}" = x ]; then
+            export LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET=1
+            export LIMUX_ORIGINAL_WEBKIT_EXEC_PATH="${WEBKIT_EXEC_PATH}"
+        else
+            export LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET=0
+            export LIMUX_ORIGINAL_WEBKIT_EXEC_PATH=""
+        fi
+        if [ "${WEBKIT_INJECTED_BUNDLE_PATH+x}" = x ]; then
+            export LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET=1
+            export LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH="${WEBKIT_INJECTED_BUNDLE_PATH}"
+        else
+            export LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET=0
+            export LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH=""
+        fi
+        printf "%s\n" \
+            "$LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET:$LIMUX_ORIGINAL_LD_LIBRARY_PATH" \
+            "$LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET:$LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE" \
+            "$LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET:$LIMUX_ORIGINAL_WEBKIT_EXEC_PATH" \
+            "$LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET:$LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH"
+    '
+}
+
+result=$(run_apprun_preserve_block "/host/lib" "/host/pixbuf.cache" "/host/webkit" "/host/bundle")
+expected=$'1:/host/lib\n1:/host/pixbuf.cache\n1:/host/webkit\n1:/host/bundle'
+if [[ "$result" == "$expected" ]]; then
+    pass "records original app-sensitive environment"
+else
+    fail "records original app-sensitive environment" "got: $result"
+fi
+
+# ----- T5: LIMUX_REQUIRE_SVG_LOADER hard-fail vs warn-only -----
+
+echo "T5: LIMUX_REQUIRE_SVG_LOADER gates exit 1"
 
 # Excerpt the warn-or-exit logic — paste-equivalent to the script.
 warn_or_exit() {
@@ -150,7 +204,7 @@ warn_or_exit() {
 ec=0
 warn_or_exit "" >/dev/null 2>&1 || ec=$?
 if [ "$ec" = "0" ]; then
-    pass "no env var → warn and continue (exit 0)"
+    pass "no env var -> warn and continue (exit 0)"
 else
     fail "warn-only path" "expected exit 0, got $ec"
 fi
@@ -158,7 +212,7 @@ fi
 ec=0
 warn_or_exit "1" >/dev/null 2>&1 || ec=$?
 if [ "$ec" = "99" ]; then
-    pass "LIMUX_REQUIRE_SVG_LOADER=1 → hard fail (exit 99)"
+    pass "LIMUX_REQUIRE_SVG_LOADER=1 -> hard fail (exit 99)"
 else
     fail "hard-fail path" "expected exit 99, got $ec"
 fi

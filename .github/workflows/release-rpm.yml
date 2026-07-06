@@ -71,6 +71,9 @@ jobs:
           meson install -C /tmp/blueprint-compiler/_build
           echo "/tmp/blueprint-prefix/bin" >> "$GITHUB_PATH"
 
+      - name: Test AppImage SVG loader packaging
+        run: ./scripts/tests/test-package-svg-loader.sh
+
       - name: Build RPM package
         env:
           LIMUX_MAX_GLIBC: "2.39"

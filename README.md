@@ -33,9 +33,14 @@ chmod +x Limux-0.1.20-x86_64.AppImage
 ```
 
 Release AppImages are built and checked on the Ubuntu 24.04 `GLIBC_2.39`
-floor. Limux still uses the host GTK4, libadwaita, and WebKitGTK runtime
-libraries, so older distributions may need the `.deb`, tarball, or a source
-build with matching system packages instead.
+floor. They bundle Limux, Ghostty resources, WebKitGTK helper processes, and
+AppImage-only loader modules such as the gdk-pixbuf SVG loader. They still use
+the host GTK4 and libadwaita runtime, so older distributions may need the
+`.deb`, tarball, or a source build with matching system packages instead.
+
+AppImage runtime library paths are scoped to the Limux app process. Terminals
+spawned inside Limux restore the user's original library/loader environment so
+host tools such as Flatpak do not load AppImage-private libraries first.
 
 **Tarball** — manual install:
 ```bash

@@ -127,6 +127,44 @@ fn sanitize_terminal_child_env() {
     std::env::remove_var("NO_COLOR");
 }
 
+pub(crate) fn terminal_child_environment_overrides() -> Vec<(String, String)> {
+    const RESTORE_VARS: &[(&str, &str, &str)] = &[
+        (
+            "LD_LIBRARY_PATH",
+            "LIMUX_ORIGINAL_LD_LIBRARY_PATH",
+            "LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET",
+        ),
+        (
+            "GDK_PIXBUF_MODULE_FILE",
+            "LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE",
+            "LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET",
+        ),
+        (
+            "WEBKIT_EXEC_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_EXEC_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET",
+        ),
+        (
+            "WEBKIT_INJECTED_BUNDLE_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET",
+        ),
+    ];
+
+    RESTORE_VARS
+        .iter()
+        .filter(|(_, _, marker)| std::env::var(marker).is_ok())
+        .map(|(target, value_key, marker)| {
+            let value = if std::env::var(marker).ok().as_deref() == Some("1") {
+                std::env::var(value_key).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            ((*target).to_string(), value)
+        })
+        .collect()
+}
+
 fn gtk_runtime_version() -> (u32, u32, u32) {
     unsafe {
         (
@@ -189,6 +227,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::fs;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -244,6 +283,32 @@ mod tests {
         std::env::temp_dir().join(format!("limux-{label}-{}-{nanos}", std::process::id()))
     }
 
+    struct EnvGuard {
+        values: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                values: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.values.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn sanitize_terminal_child_env_removes_no_color() {
         let original = std::env::var_os("NO_COLOR");
@@ -256,6 +321,53 @@ mod tests {
             Some(value) => std::env::set_var("NO_COLOR", value),
             None => std::env::remove_var("NO_COLOR"),
         }
+    }
+
+    #[test]
+    fn terminal_child_environment_overrides_restore_appimage_values() {
+        let _lock = GHOSTTY_ENV_LOCK
+            .lock()
+            .expect("terminal env test lock poisoned");
+        let _guard = EnvGuard::capture(&[
+            "LD_LIBRARY_PATH",
+            "LIMUX_ORIGINAL_LD_LIBRARY_PATH",
+            "LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET",
+            "GDK_PIXBUF_MODULE_FILE",
+            "LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE",
+            "LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET",
+            "WEBKIT_EXEC_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_EXEC_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET",
+            "WEBKIT_INJECTED_BUNDLE_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH",
+            "LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET",
+        ]);
+
+        std::env::set_var("LD_LIBRARY_PATH", "/tmp/.mount_Limux/usr/lib");
+        std::env::set_var("LIMUX_ORIGINAL_LD_LIBRARY_PATH", "/host/lib");
+        std::env::set_var("LIMUX_ORIGINAL_LD_LIBRARY_PATH_SET", "1");
+        std::env::set_var("GDK_PIXBUF_MODULE_FILE", "/tmp/.mount_Limux/pixbuf.cache");
+        std::env::set_var("LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE", "");
+        std::env::set_var("LIMUX_ORIGINAL_GDK_PIXBUF_MODULE_FILE_SET", "0");
+        std::env::set_var(
+            "WEBKIT_EXEC_PATH",
+            "/tmp/.mount_Limux/usr/lib/webkitgtk-6.0",
+        );
+        std::env::set_var("LIMUX_ORIGINAL_WEBKIT_EXEC_PATH", "/host/webkit");
+        std::env::set_var("LIMUX_ORIGINAL_WEBKIT_EXEC_PATH_SET", "1");
+        std::env::set_var(
+            "WEBKIT_INJECTED_BUNDLE_PATH",
+            "/tmp/.mount_Limux/usr/lib/webkitgtk-6.0/injected-bundle",
+        );
+        std::env::set_var("LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH", "");
+        std::env::set_var("LIMUX_ORIGINAL_WEBKIT_INJECTED_BUNDLE_PATH_SET", "0");
+
+        let overrides = terminal_child_environment_overrides();
+
+        assert!(overrides.contains(&("LD_LIBRARY_PATH".to_string(), "/host/lib".to_string())));
+        assert!(overrides.contains(&("GDK_PIXBUF_MODULE_FILE".to_string(), String::new())));
+        assert!(overrides.contains(&("WEBKIT_EXEC_PATH".to_string(), "/host/webkit".to_string())));
+        assert!(overrides.contains(&("WEBKIT_INJECTED_BUNDLE_PATH".to_string(), String::new())));
     }
 
     #[test]

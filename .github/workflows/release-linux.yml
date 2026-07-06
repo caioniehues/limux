@@ -88,6 +88,9 @@ jobs:
             -o /tmp/appimagetool
           chmod +x /tmp/appimagetool
 
+      - name: Test AppImage SVG loader packaging
+        run: ./scripts/tests/test-package-svg-loader.sh
+
       - name: Build Linux packages
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
