@@ -892,6 +892,14 @@ struct TabEntry {
     kind: TabKind,
 }
 
+impl TabEntry {
+    fn prepare_for_removal(&self) {
+        if let TabKind::Browser { state } = &self.kind {
+            state.handles.prepare_for_removal();
+        }
+    }
+}
+
 struct TabState {
     tabs: Vec<TabEntry>,
     active_tab: Option<String>,
@@ -1225,11 +1233,77 @@ fn make_terminal_callbacks(
     }
 }
 
+fn is_safe_browser_url(url: &str) -> bool {
+    // Minimal allow-list of URI schemes that may be handed to the system
+    // browser on Ctrl+click. The threat model is hostile terminal output:
+    // anything that ends up in a pane's scrollback can craft an OSC 8
+    // hyperlink, and clicking it must not lead to code execution.
+    //
+    // Why only http/https/mailto?
+    // - `javascript:`, `vbscript:`, `data:` are classic XSS sinks (Gitea
+    //   blocks these unconditionally — github.com/go-gitea/gitea#25960).
+    // - `file://` directly opens local files via the registered handler;
+    //   a hostile `cat` of a crafted .desktop file would be RCE.
+    // - `ftp://`, `ftps://`, `smb://`, `nfs://`, `dav://`, `sftp://` all
+    //   auto-mount via gvfs and can execute binaries on the mounted share
+    //   (positive.security/blog/url-open-rce).
+    // - Custom schemes (`vscode://`, `slack://`, `obsidian://`, ...) have
+    //   historically had RCE CVEs in their handlers; we don't second-guess
+    //   that surface area here.
+    //
+    // RFC 3986 §3.1: scheme matching is case-insensitive.
+    let Some(colon) = url.find(':') else {
+        return false;
+    };
+    let scheme = url[..colon].to_ascii_lowercase();
+    let rest = &url[colon..];
+    match scheme.as_str() {
+        "https" | "http" => rest.starts_with("://"),
+        "mailto" => rest.starts_with(':'),
+        _ => false,
+    }
+}
+
 fn open_url_in_external_browser(url: &str) {
-    if let Err(err) =
-        gtk::gio::AppInfo::launch_default_for_uri(url, None::<&gtk::gio::AppLaunchContext>)
+    if !is_safe_browser_url(url) {
+        eprintln!("limux: refusing to open URL with unrecognized scheme: {url}");
+        return;
+    }
+
+    // Use the GDK display's launch context so GIO emits an xdg-activation
+    // token. Without it, the target app (e.g. Firefox) receives the URL but
+    // Wayland refuses to let it raise its window — Konsole works because KIO
+    // wires the token in the same way.
+    if let Some(display) = gtk::gdk::Display::default() {
+        let context = display.app_launch_context();
+        match gtk::gio::AppInfo::launch_default_for_uri(url, Some(&context)) {
+            Ok(_) => return,
+            Err(err) => {
+                eprintln!("limux: gio launch failed, falling back to xdg-open: {err}");
+            }
+        }
+    }
+
+    // Fallback: spawn xdg-open. Loses activation but at least delivers the URL
+    // in AppImage / sandboxed contexts where the bundled GIO can't dispatch.
+    // Reap the child in a detached thread — xdg-open exits as soon as it
+    // hands the URL off to the registered handler, and a dropped Child would
+    // otherwise linger as a <defunct> entry until the host process exits.
+    match std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
     {
-        eprintln!("limux: failed to open URL in external browser: {err}");
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(err) => {
+            eprintln!("limux: failed to spawn xdg-open for {url}: {err}");
+        }
     }
 }
 
@@ -2800,6 +2874,7 @@ fn remove_tab(
     };
     let entry = ts.tabs.remove(idx);
 
+    entry.prepare_for_removal();
     tab_strip.remove(&entry.tab_button);
     content_stack.remove(&entry.content);
 
@@ -2900,6 +2975,13 @@ impl BrowserShortcutTarget {
 
 #[cfg(feature = "webkit")]
 impl BrowserHandles {
+    fn prepare_for_removal(&self) {
+        self.find_controller.search_finish();
+        self.search_bar.set_search_mode(false);
+        self.dom_editable.set(false);
+        self.webview.stop_loading();
+    }
+
     fn is_find_active(&self) -> bool {
         self.search_bar.is_search_mode()
     }
@@ -2988,10 +3070,10 @@ impl BrowserHandles {
     }
 
     fn use_selection_for_find(&self) -> bool {
-        let search_entry = self.search_entry.clone();
-        let search_bar = self.search_bar.clone();
-        let find_controller = self.find_controller.clone();
-        let webview = self.webview.clone();
+        let search_entry = self.search_entry.downgrade();
+        let search_bar = self.search_bar.downgrade();
+        let find_controller = self.find_controller.downgrade();
+        let webview = self.webview.downgrade();
         self.webview.evaluate_javascript(
             "window.getSelection ? window.getSelection().toString() : '';",
             None,
@@ -3005,14 +3087,21 @@ impl BrowserHandles {
                 if selection.is_empty() {
                     return;
                 }
+                let Some(search_bar) = search_bar.upgrade() else {
+                    return;
+                };
+                let Some(search_entry) = search_entry.upgrade() else {
+                    return;
+                };
+                let Some(find_controller) = find_controller.upgrade() else {
+                    return;
+                };
+                let Some(webview) = webview.upgrade() else {
+                    return;
+                };
                 search_bar.set_search_mode(true);
                 search_entry.set_text(selection.as_str());
-                find_controller.search(
-                    selection.as_str(),
-                    webkit6::FindOptions::CASE_INSENSITIVE.bits()
-                        | webkit6::FindOptions::WRAP_AROUND.bits(),
-                    u32::MAX,
-                );
+                search_for_browser_text(&find_controller, selection.as_str());
                 search_entry.grab_focus();
                 search_entry.select_region(0, -1);
                 webview.queue_draw();
@@ -3022,22 +3111,27 @@ impl BrowserHandles {
     }
 
     fn search_for_entry_text(&self) {
-        let query = self.search_entry.text();
-        if query.is_empty() {
-            self.find_controller.search_finish();
-            return;
-        }
-        self.find_controller.search(
-            query.as_str(),
-            webkit6::FindOptions::CASE_INSENSITIVE.bits()
-                | webkit6::FindOptions::WRAP_AROUND.bits(),
-            u32::MAX,
-        );
+        search_for_browser_text(&self.find_controller, self.search_entry.text().as_str());
     }
+}
+
+#[cfg(feature = "webkit")]
+fn search_for_browser_text(find_controller: &webkit6::FindController, query: &str) {
+    if query.is_empty() {
+        find_controller.search_finish();
+        return;
+    }
+    find_controller.search(
+        query,
+        webkit6::FindOptions::CASE_INSENSITIVE.bits() | webkit6::FindOptions::WRAP_AROUND.bits(),
+        u32::MAX,
+    );
 }
 
 #[cfg(not(feature = "webkit"))]
 impl BrowserHandles {
+    fn prepare_for_removal(&self) {}
+
     fn is_find_active(&self) -> bool {
         false
     }
@@ -3283,32 +3377,40 @@ fn create_browser_widget(
     nav_bar.append(&url_entry);
 
     {
-        let wv = webview.clone();
+        let webview = webview.downgrade();
         back_btn.connect_clicked(move |_| {
-            wv.go_back();
+            if let Some(webview) = webview.upgrade() {
+                webview.go_back();
+            }
         });
     }
     {
-        let wv = webview.clone();
+        let webview = webview.downgrade();
         fwd_btn.connect_clicked(move |_| {
-            wv.go_forward();
+            if let Some(webview) = webview.upgrade() {
+                webview.go_forward();
+            }
         });
     }
     {
-        let wv = webview.clone();
+        let webview = webview.downgrade();
         reload_btn.connect_clicked(move |_| {
-            wv.reload();
+            if let Some(webview) = webview.upgrade() {
+                webview.reload();
+            }
         });
     }
     {
-        let wv = webview.clone();
+        let webview = webview.downgrade();
         url_entry.connect_activate(move |entry| {
-            let url = normalize_browser_entry_input(&entry.text());
-            wv.load_uri(&url);
+            if let Some(webview) = webview.upgrade() {
+                let url = normalize_browser_entry_input(&entry.text());
+                webview.load_uri(&url);
+            }
         });
     }
     {
-        let entry = url_entry.clone();
+        let entry = url_entry.downgrade();
         let saved_uri = saved_uri.clone();
         let callbacks = callbacks.clone();
         let restoring = Rc::new(std::cell::Cell::new(initial_uri.is_some()));
@@ -3316,7 +3418,9 @@ fn create_browser_widget(
         webview.connect_uri_notify(move |wv| {
             if let Some(uri) = wv.uri() {
                 let uri_str: String = uri.into();
-                entry.set_text(&uri_str);
+                if let Some(entry) = entry.upgrade() {
+                    entry.set_text(&uri_str);
+                }
                 if restoring_flag.get() && (uri_str.is_empty() || uri_str == "about:blank") {
                     return;
                 }
@@ -3342,13 +3446,19 @@ fn create_browser_widget(
     search_bar.connect_entry(&search_entry);
     search_bar.set_child(Some(&search_entry));
     {
-        let search_bar = search_bar.clone();
-        let find_controller = find_controller.clone();
-        let webview = webview.clone();
+        let search_bar = search_bar.downgrade();
+        let find_controller = find_controller.downgrade();
+        let webview = webview.downgrade();
         search_entry.connect_stop_search(move |_| {
-            find_controller.search_finish();
-            search_bar.set_search_mode(false);
-            webview.grab_focus();
+            if let Some(find_controller) = find_controller.upgrade() {
+                find_controller.search_finish();
+            }
+            if let Some(search_bar) = search_bar.upgrade() {
+                search_bar.set_search_mode(false);
+            }
+            if let Some(webview) = webview.upgrade() {
+                webview.grab_focus();
+            }
         });
     }
     {
@@ -3379,25 +3489,29 @@ fn create_browser_widget(
     };
 
     {
-        let browser_handles = browser_handles.clone();
-        search_entry.connect_search_changed(move |_| {
-            browser_handles.search_for_entry_text();
+        let find_controller = find_controller.downgrade();
+        search_entry.connect_search_changed(move |entry| {
+            if let Some(find_controller) = find_controller.upgrade() {
+                search_for_browser_text(&find_controller, entry.text().as_str());
+            }
         });
     }
 
     // Load default URL only on the first map. The WebView preserves its
     // page and history across reparenting (splits), so we must not reload.
     {
-        let wv = webview.clone();
+        let webview = webview.downgrade();
         let loaded = std::cell::Cell::new(false);
         let initial_uri = initial_uri.map(|value| value.to_string());
         vbox.connect_map(move |_| {
             if !loaded.get() {
                 loaded.set(true);
-                if let Some(uri) = &initial_uri {
-                    wv.load_uri(uri);
-                } else {
-                    wv.load_uri("https://google.com");
+                if let Some(webview) = webview.upgrade() {
+                    if let Some(uri) = &initial_uri {
+                        webview.load_uri(uri);
+                    } else {
+                        webview.load_uri("https://google.com");
+                    }
                 }
             }
         });
@@ -3474,11 +3588,12 @@ fn create_browser_widget(
 mod tests {
     use super::{
         classify_content_drop_zone, content_drop_preview_rect, effective_drop_target_dimensions,
-        is_localhost_input, next_active_after_tab_removal, normalize_browser_entry_input,
-        normalize_reorder_insert_index, pane_action_tooltip, surface_hint_matches, ContentDropZone,
-        TabDragPayload, BROWSER_SEARCH_ENTRY_CSS_CLASS, BROWSER_SEARCH_ENTRY_CSS_CLASSES,
-        BROWSER_URL_ENTRY_CSS_CLASS, BROWSER_URL_ENTRY_CSS_CLASSES, HOST_ENTRY_CSS_CLASS, PANE_CSS,
-        TAB_RENAME_ENTRY_CSS_CLASS, TAB_RENAME_ENTRY_CSS_CLASSES,
+        is_localhost_input, is_safe_browser_url, next_active_after_tab_removal,
+        normalize_browser_entry_input, normalize_reorder_insert_index, pane_action_tooltip,
+        surface_hint_matches, ContentDropZone, TabDragPayload, BROWSER_SEARCH_ENTRY_CSS_CLASS,
+        BROWSER_SEARCH_ENTRY_CSS_CLASSES, BROWSER_URL_ENTRY_CSS_CLASS,
+        BROWSER_URL_ENTRY_CSS_CLASSES, HOST_ENTRY_CSS_CLASS, PANE_CSS, TAB_RENAME_ENTRY_CSS_CLASS,
+        TAB_RENAME_ENTRY_CSS_CLASSES,
     };
     #[cfg(feature = "webkit")]
     use super::{
@@ -3766,6 +3881,76 @@ mod tests {
 
         for (input, expected) in cases {
             assert_eq!(normalize_browser_entry_input(input), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn is_safe_browser_url_accepts_navigable_schemes() {
+        // Web + email only — see the rationale on `is_safe_browser_url`.
+        for url in [
+            "https://example.com",
+            "https://example.com/path?x=1&y=2",
+            "http://example.com",
+            "http://localhost:8080/foo",
+            "mailto:user@example.com",
+            "mailto:user@example.com?subject=hi",
+        ] {
+            assert!(is_safe_browser_url(url), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn is_safe_browser_url_is_scheme_case_insensitive() {
+        // RFC 3986 §3.1: scheme matching is case-insensitive. OSC 8 hyperlinks
+        // sometimes preserve the original case from upstream sources, so we
+        // must not reject syntactically valid uppercase/mixed-case schemes.
+        for url in [
+            "HTTPS://example.com",
+            "Https://example.com",
+            "HTTP://example.com",
+            "MAILTO:user@example.com",
+        ] {
+            assert!(is_safe_browser_url(url), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn is_safe_browser_url_rejects_unsupported_or_dangerous_schemes() {
+        // Threat model: hostile terminal output can craft any OSC 8 hyperlink.
+        // The schemes below are either classic XSS sinks (`javascript:`,
+        // `data:`, `vbscript:`), gvfs auto-mount + exec vectors
+        // (`smb:`, `nfs:`, `dav:`, `davs:`, `sftp:`, `ftp:`, `ftps:`), local
+        // RCE via the file handler (`file:`), or app-specific URIs whose
+        // handlers have a history of RCE CVEs (`vscode:`, `slack:`, etc.).
+        // Leading whitespace and bare paths are also rejected as malformed.
+        for url in [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "File:///home/manu/notes.md",
+            "ftp://ftp.example.com/pub/file",
+            "ftps://ftp.example.com/pub/file",
+            "smb://server/share",
+            "nfs://server/export",
+            "dav://server/path",
+            "davs://server/path",
+            "sftp://user@host/path",
+            "ssh://user@host",
+            "magnet:?xt=urn:btih:abc",
+            "chrome://settings",
+            "about:blank",
+            "vscode://file/path",
+            "slack://open?team=T",
+            "  https://example.com",
+            "/etc/passwd",
+            "example.com",
+            "",
+            "https:",
+            "http:/example.com",
+        ] {
+            assert!(!is_safe_browser_url(url), "should reject {url:?}");
         }
     }
 }
