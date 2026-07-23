@@ -114,3 +114,20 @@ rg -n "PaneCallbacks \{"                           rust/limux-host-linux/src/win
 - **User install/usage** → `README.md`
 - **Inter-agent message format** → the AGENTS.md that `limux agent-team`
   writes into the shared cwd at runtime (not this repo's AGENTS.md).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live on GitHub at `caioniehues/limux` (the `origin` remote — not
+`upstream`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` + `docs/adr/` (created lazily by
+`/domain-modeling`). See `docs/agents/domain.md`.
